@@ -12,7 +12,8 @@ import numpy as np
 import sys
 
 # Lets define the 4 input samples that will be used by both models:
-x1 = torch.tensor([1.1,1.2,1.3,1.4], requires_grad=True)
+x1 = torch.tensor([1.1,1.2,1.3,1.4], requires_grad=False)
+x1.detach()
 
 #===============================================================================
 # Model 1: With delay line
@@ -27,15 +28,15 @@ x1 = torch.tensor([1.1,1.2,1.3,1.4], requires_grad=True)
 
 # Define the first sub-network using Pytorch primitives (tensors, parameters, etc):
 # The first layer is a linear layer taking one input with 4 neurons, applying 4 tanh nonlinearities, and outputting 4 values.
-# Here are those weights and biases
+# Here are those weights and biases. They should be declared as parameters:
 w1 = torch.tensor([[1.0, 2.0, 3.0, 4.0]], requires_grad=True)
-b1 = torch.tensor([0.1, 0.2, 0.3, 0.4], requires_grad=True)
+b1 = torch.tensor([[0.1], [0.2], [0.3], [0.4]], requires_grad=True)
 
 # Then it projects the output back to a single number using these weights:
 w2 = torch.tensor([[1.5],[2.6],[3.7],[4.8]], requires_grad=True)
 
 # Here's the delay line:
-delay_line = torch.zeros(4, requires_grad=True)
+delay_line = torch.zeros(4, 1, requires_grad=True)
 
 # And now the second sub-network:
 # The first layer is a linear layer taking 4 inputs with 4 neurons, applying 4 tanh nonlinearities, and outputting 4 values.
@@ -44,7 +45,7 @@ w3 = torch.tensor([[0.1, 0.2, 0.3, 0.4],
                    [0.5, 0.6, 0.7, 0.8],
                    [0.9, 1.0, 1.1, 1.2],
                    [1.3, 1.4, 1.5, 1.6]], requires_grad=True)
-b3 = torch.tensor([0.9, 0.8, 0.7, 0.6], requires_grad=True)
+b3 = torch.tensor([[0.9], [0.8], [0.7], [0.6]], requires_grad=True)
 
 # Then it projects the output back to a single number using these weights:
 w4 = torch.tensor([[1.8],[2.7],[3.6],[4.5]], requires_grad=True)
@@ -73,36 +74,38 @@ w4 = torch.tensor([[1.8],[2.7],[3.6],[4.5]], requires_grad=True)
 # Lets do this in a for loop to process one sample at a time from x1:
 for i in range(4):
     # Print the model number and the sample index:
-    print("Model 1:" + " i = " + str(i))
-    # First, we need to compute the output of the first sub-network:
-    y1 = torch.matmul(x1[i], w1.t()) + b1
-    y1 = torch.tanh(y1)
-    y1 = torch.matmul(y1, w2)
-    # Now we need to push this output into the delay line:
-    delay_line = torch.roll(delay_line, 1)
+    print("Model 1:" + " i = " + str(i) + " -------------------------")
+    # First, we need to compute the output of the first sub-network
+    # We want to do y1 = torch.matmul(x1[i], w1.t()) + b1, but x1[i] is a scalar, so we'll just
+    # do a regular multiplication: 
+    y1 = x1[i] * w1.t() + b1
+    y1 = torch.relu(y1)
+    y1 = torch.matmul(y1.t(), w2)
+    # Now we need to push this output into the delay line.
+    # The delay line is a column vector, so we need to roll it vertically:
+    delay_line = torch.roll(delay_line, 1, 0)
     delay_line[0] = y1
     # Now we need to run the second sub-network:
     # First, we need to compute the output of the second sub-network:
-    y2 = torch.matmul(delay_line, w3.t()) + b3
-    y2 = torch.tanh(y2)
-    y2 = torch.matmul(y2, w4)
+    y2 = torch.matmul(w3.t(), delay_line) + b3
+    y2 = torch.relu(y2)
+    y2 = torch.matmul(y2.t(), w4)
     print("y2 = " + str(y2))
     # Now we need to compute the loss. We don't have any training data, so we can just pretend 0 is the target:
     loss = (y2 - 0)**2
     # Now we need to compute the gradients of the weights of the first sub-network with respect to the loss:
-    loss.backward()
+    loss.backward(retain_graph=True)
     # Now we need to print the gradients of the weights of the first sub-network with respect to the loss:
     print("Gradients of the weights of the first sub-network with respect to the loss:")
-    print(w1.grad)
-    print(b1.grad)
-    print(w2.grad)
+    print("w1:", w1.grad)
+    print("b1:", b1.grad)
+    print("w2:", w2.grad)
     print("")
     # Now we need to print the gradients of the weights of the second sub-network with respect to the loss:
     print("Gradients of the weights of the second sub-network with respect to the loss:")
-    print(w3.grad)
-    print(b3.grad)
-    print(w4.grad)
-    print("")
+    print("w3:", w3.grad)
+    print("b3:", b3.grad)
+    print("w4:", w4.grad)
     # Now we need to zero out the gradients of the weights of the first sub-network:
     w1.grad.zero_()
     b1.grad.zero_()
@@ -118,10 +121,6 @@ for i in range(4):
 
 
     
-
-
-
-
 
 
 
