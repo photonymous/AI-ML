@@ -2,15 +2,19 @@ from torch.utils.data import DataLoader, TensorDataset
 from char_predictor import *
 
 vocab_size = 256
-embedding_dim = 64
-context_window = 64
-hidden_dims = [1024,1024,1024,1024,1024,1024,1024,1024,1024,1024]
+embedding_dim = 16
+context_window = 16
+hidden_dims = [32,64,128]
+#############################################
 
-batch_size = 8192
-num_epochs = 200
+batch_size = 1024
+num_epochs = 40
+max_chars  = 2**17
 
-# Read the corpus and prepare the input and target sequences
-corpus = read_corpus("corpus.txt")
+corpus     = read_corpus("/data/training_data/gutenberg_corpus_21MB.txt", max_chars)
+
+
+# Prepare the input and target sequences
 input_sequences, target_sequences = prepare_sequences(corpus, context_window)
 
 # Create a DataLoader for the input and target sequences
@@ -24,7 +28,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = CharPredictor(vocab_size, embedding_dim, context_window, hidden_dims)
 total_parameters = sum(param.numel() for param in model.parameters())
 criterion = nn.NLLLoss()
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)#, weight_decay=0.01)
 
 print(f"Total number of trainable parameters: {total_parameters}", flush=True)
 

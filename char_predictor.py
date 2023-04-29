@@ -85,10 +85,9 @@ def generate_text(model, initial_context, num_chars, device, vocab_size):
     return generated_text
 
 
-def read_corpus(file_path):
+def read_corpus(file_path, max_chars=None):
     with open(file_path, 'rb') as f:
-        #corpus = f.read(2**20)
-        corpus = f.read()
+        corpus = f.read(max_chars)
     return corpus
 
 

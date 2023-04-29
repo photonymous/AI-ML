@@ -1,0 +1,77 @@
+Experiment 1:
+    vocab_size = 256
+    embedding_dim = 16
+    context_window = 16
+    hidden_dims = [128,64,32]
+    batch_size = 1024
+    num_epochs = 40
+    max_chars  = 2**17
+
+    loss: 1.56
+    number of parameters: 55776
+
+    Generated Text:
+        have paid for this, when impromunes, be of his brystroention.--I sahe. He
+        friends theragent, she hat my moriknled himself scike at. *e hern streen, ceaved
+        him choasele, Quin an be
+        procers.
+        The streate
+        are have bo
+        anf it
+        ebm with gracelhs,
+
+        This gaster, I
+        the
+        do Missale the gofse brother of a 
+        is a paids, ling protenled that For and the same her frierf
+        an some, watey, than their the fusing &lwoase. Furn ho in
+        pmeluaca.
+        Then his
+        mestyâs denking surpaidring ditiote, howming dre
+        profigusible his r
+
+Experiment 2:
+    vocab_size     = 256
+    embedding_dim  = 16
+    context_window = 16
+    hidden_dims    = [64,64,64]
+    batch_size     = 1024
+    num_epochs     = 40
+    max_chars      = 2**17
+
+    loss: 1.62
+    number of parameters: 45504
+
+    Generated Text:
+        have paid for the shout fir off, to ind conchyâ But onmeriance and her wind they Phs Howeft cacey of be Welitheruy poses in he funumeng thind
+        parhart. Inter--I
+        the graThto of some affectionals of irberroves scloned be as it wurd, and with you bed heacter, with as is in; and such
+        I think that that inclar, and beliet if Somis agised of tres the ride, who kncondel you know that cot count aff that thount ehe restrnowed iressord--I how veniture Yourse
+        no be ough those itterued by a dut
+        go would cime
+        me ins o
+
+Experiment 3:
+    vocab_size = 256
+    embedding_dim = 16
+    context_window = 16
+    hidden_dims = [32,64,128]
+    batch_size = 1024
+    num_epochs = 40
+    max_chars  = 2**17
+
+    loss: 1.65
+    number of parameters: 55776
+
+    Generated Text:
+        Experiment 2:
+        vocab_size = 256
+        embedding_dim = 16
+        context_window = 16
+        hidden_dims = [64,64,64]
+        batch_size = 1024
+        num_epochs = 40
+        max_chars  = 2**17
+
+        loss: 1.62
+        number of parameters: 45504
