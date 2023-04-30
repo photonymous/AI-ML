@@ -57,8 +57,8 @@ b3 = torch.tensor([[0.9], [0.8], [0.7], [0.6]], requires_grad=True)
 w4 = torch.tensor([[1.8],[2.7],[3.6],[4.5]], requires_grad=True)
 
 
-if WHICH_MODEL == 1:
-    #===============================================================================
+#===============================================================================
+def run_model1(x1, n_samples, w1, b1, w2, delay_line, w3, b3, w4):
     # Run Model 1:
     # Now we will run the first model and we will examine the gradients of the weights of the first sub-network with respect to the output of the second sub-network.
     # Lets do this in a for loop to process one sample at a time from x1:
@@ -73,11 +73,13 @@ if WHICH_MODEL == 1:
         y1 = torch.matmul(y1.t(), w2)
         # Now we need to push this output into the delay line.
         # The delay line is a column vector, so we need to roll it vertically:
-        delay_line = torch.roll(delay_line, 1, 0)
-        delay_line[0] = y1
+        #delay_line = torch.roll(delay_line, 1, 0)
+        #delay_line[0] = y1
+        delay_line = torch.roll(delay_line, -1, 0)
+        delay_line[-1] = y1
         print("delay_line = " + str(delay_line))
         # Now we need to run the second sub-network:
-        y2 = torch.matmul(w3.t(), delay_line) + b3
+        y2 = torch.matmul(w3, delay_line) + b3
         y2 = torch.relu(y2)
         y2 = torch.matmul(y2.t(), w4)
         print("y2 = " + str(y2))
@@ -105,8 +107,9 @@ if WHICH_MODEL == 1:
         b3.grad.zero_()
         w4.grad.zero_()
 
-else:
-    #===============================================================================
+
+#===============================================================================
+def run_model2(x1, n_samples, w1, b1, w2, delay_line, w3, b3, w4):
     # Run Model 2: No delay line
     # The second model shows how this exact same process can be implemented without the delay line.
     # In this case, four copies of the sub-network will be used, and the outputs of each sub-network will be fed to the second sub-network.
@@ -169,9 +172,19 @@ else:
 
 
 
+#===============================================================================
+# Now do an if name == main check and allow the input argument to set the model number:
+if __name__ == "__main__":
+    # If there is an input argument, use it to set the model number:
+    if len(sys.argv) > 1:
+        WHICH_MODEL = int(sys.argv[1])
 
 
-
+# Now run the model:
+if WHICH_MODEL == 1:
+    run_model1(x1, n_samples, w1, b1, w2, delay_line, w3, b3, w4)
+else:
+    run_model2(x1, n_samples, w1, b1, w2, delay_line, w3, b3, w4)
 
 
 
