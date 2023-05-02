@@ -26,12 +26,12 @@ MODE           = "train"
 SEED_STR       = "Once upon a tim"
 NUM_CHARS      = 500
 EMBEDDING_LEN  = 16
-SEQ_LEN        = 128
+SEQ_LEN        = 64
 WARMUP         = 16
-HIDDEN_DIM     = 128
+HIDDEN_DIM     = 64
 NUM_LAYERS     = 2
 NUM_EPOCHS     = 40
-BATCH_SIZE     = 1024
+BATCH_SIZE     = 32
 MAX_CHARS      = 2**17
 CORPUS_FILE    = "/data/training_data/gutenberg_corpus_21MB.txt"
 MODEL_FILE     = "trained_rnn.pth"
@@ -39,19 +39,19 @@ MODEL_FILE     = "trained_rnn.pth"
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
 parser = argparse.ArgumentParser(description='Train or generate text using a character predicting RNN.')
-parser.add_argument('--mode', type=str, default=MODE, help='The mode: train or generate (default: %(default)s)')
-parser.add_argument('--seed_str', type=str, default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
-parser.add_argument('--num_chars', type=int, default=NUM_CHARS, help='The number of characters to generate (default: %(default)s)')
+parser.add_argument('--mode',          type=str, default=MODE, help='The mode: train or generate (default: %(default)s)')
+parser.add_argument('--seed_str',      type=str, default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
+parser.add_argument('--num_chars',     type=int, default=NUM_CHARS, help='The number of characters to generate (default: %(default)s)')
 parser.add_argument('--embedding_len', type=int, default=EMBEDDING_LEN, help='The embedding length (default: %(default)s)')
-parser.add_argument('--seq_len', type=int, default=SEQ_LEN, help='The sequence length (default: %(default)s)')
-parser.add_argument('--warmup', type=int, default=WARMUP, help='The warmup (default: %(default)s)')
-parser.add_argument('--hidden_dim', type=int, default=HIDDEN_DIM, help='The hidden dimension (default: %(default)s)')
-parser.add_argument('--num_layers', type=int, default=NUM_LAYERS, help='The number of layers (default: %(default)s)')
-parser.add_argument('--num_epochs', type=int, default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
-parser.add_argument('--batch_size', type=int, default=BATCH_SIZE, help='The batch size (default: %(default)s)')
-parser.add_argument('--max_chars', type=int, default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
-parser.add_argument('--corpus_file', type=str, default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
-parser.add_argument('--model_file', type=str, default=MODEL_FILE, help='The model file (default: %(default)s)')
+parser.add_argument('--seq_len',       type=int, default=SEQ_LEN, help='The sequence length (default: %(default)s)')
+parser.add_argument('--warmup',        type=int, default=WARMUP, help='The warmup (default: %(default)s)')
+parser.add_argument('--hidden_dim',    type=int, default=HIDDEN_DIM, help='The hidden dimension (default: %(default)s)')
+parser.add_argument('--num_layers',    type=int, default=NUM_LAYERS, help='The number of layers (default: %(default)s)')
+parser.add_argument('--num_epochs',    type=int, default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
+parser.add_argument('--batch_size',    type=int, default=BATCH_SIZE, help='The batch size (default: %(default)s)')
+parser.add_argument('--max_chars',     type=int, default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
+parser.add_argument('--corpus_file',   type=str, default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
+parser.add_argument('--model_file',    type=str, default=MODEL_FILE, help='The model file (default: %(default)s)')
 args = parser.parse_args()
 
 # Preprocess the corpus data as raw 8-bit binary data:
@@ -65,23 +65,27 @@ def read_corpus(file_path, max_chars=None):
 # input sequence will have a corresponding target character.
 def prepare_sequences(corpus, seq_len):
     corpus_tensor = torch.tensor(list(corpus), dtype=torch.long)
-    input_data = []
-    target_data = []
+    
+    # First, we need to figure out how many batches we can create:
+    num_batches = len(corpus_tensor) // seq_len
 
-    for ii in range(len(corpus_tensor) - seq_len - 1):
-        input_seq_start  = ii
-        input_seq_stop   = ii + seq_len
-        target_seq_start = input_seq_start + 1
-        target_seq_stop  = input_seq_stop + 1
+    # Now we need to figure out how many characters we need to drop from the end of the corpus tensor
+    # so that we can create an input sequence of length seq_len:
+    num_chars_to_drop = len(corpus_tensor) - (num_batches * seq_len)
 
-        input_seq  = corpus_tensor[input_seq_start:input_seq_stop]
-        target_seq = corpus_tensor[target_seq_start:target_seq_stop]
-        
-        input_data.append(input_seq)
-        target_data.append(target_seq)
+    # Now we need to drop those characters from the end of the corpus tensor:
+    if num_chars_to_drop > 0:
+        corpus_tensor = corpus_tensor[:-num_chars_to_drop]
 
-    input_data  = torch.stack(input_data)
-    target_data = torch.stack(target_data)
+    # Now we need to reshape the corpus tensor into a tensor of size (num_batches, seq_len),
+    # and we'll use view() so that we don't have to copy the data:
+    corpus_tensor = corpus_tensor.view(num_batches, seq_len)
+
+    # Now we need to create the input sequences. Each input sequence is just a little piece of the corpus.
+    # We can't quite use all of the sequence, since the target data predicts the second character through
+    # the last character, so the input data has to be the first character to the second to last character.
+    input_data  = corpus_tensor[:, :-1]
+    target_data = corpus_tensor[:, 1:]
 
     return input_data, target_data
 
@@ -97,7 +101,8 @@ class CorpusDataset(Dataset):
     def __getitem__(self, idx):
         return self.input_sequences[idx], self.target_sequences[idx]
 
-# Create the dataloader:
+# Create the dataloader. How does the batch_size relate to the seq_len?
+#  The batch_size is the number of input sequences that will be fed to the model per batch.
 def create_dataloader(input_sequences, target_sequences, batch_size):
     dataset    = CorpusDataset(input_sequences, target_sequences)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -126,13 +131,16 @@ class CharPredictorRNN(nn.Module):
         # Embed the input sequence:
         embedded = self.embedding_layer(input_sequence)
 
-        # Run the RNN:
+        # Run the RNN. When the RNN runs on the input_sequence, it will return
+        #   rnn_out, which is a tensor of size (batch_size, seq_len, hidden_dim).
         rnn_out, hidden = self.rnn(embedded)
 
-        # Run the linear layer:
+        # Run the linear layer. 
+        #   linear_out is a tensor of size (batch_size, seq_len, vocab_size).
         linear_out = self.linear(rnn_out)
 
         # Run the softmax:
+        #  softmax_out is a tensor of size (batch_size, seq_len, vocab_size).
         softmax_out = self.softmax(linear_out)
 
         return softmax_out
@@ -142,7 +150,7 @@ def train_model(model, dataloader, device, num_epochs, warmup):
     model.train()
     model.to(device)
     criterion = nn.NLLLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=0.01)
+    optimizer = optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.01)
     for epoch in range(num_epochs):
         epoch_loss = 0.0
         for batch_idx, (input_sequences, target_sequences) in enumerate(dataloader):
@@ -157,11 +165,19 @@ def train_model(model, dataloader, device, num_epochs, warmup):
             outputs = model(input_sequences)
 
             # Compute the loss:
-            #   Note that here we need to ignore the first "warmup" characters of both
-            #   the outputs and target sequences, because the input sequence is used to
-            #   predict the target sequence, and the first outputs of the model
-            #   will be garbage because the RNN has not yet seen the warmup characters:
-            loss = criterion(outputs[:,warmup:,:], target_sequences[:,warmup:])
+            # outputs is a tensor of size (batch_size, seq_len, num_classes), and
+            # target_sequences is a tensor of size (batch_size, seq_len). But I think
+            # NLLLoss() wants outputs to be of size (batch_size*seq_len, num_classes), and
+            # target_sequences needs to be of size (batch_size*seq_len). So we need to
+            # reshape these tensors... but first, we need to ignore the warmup characters in each sequence:
+            outputs = outputs[:, warmup:, :]
+            target_sequences = target_sequences[:, warmup:]
+
+            # Now reshape the outputs and targets:            
+            outputs = outputs.reshape(-1, VOCAB_SIZE)
+            target_sequences = target_sequences.reshape(-1)
+
+            loss = criterion(outputs, target_sequences)
 
             # Backward pass:
             loss.backward()
@@ -169,8 +185,8 @@ def train_model(model, dataloader, device, num_epochs, warmup):
             # Update the parameters:
             optimizer.step()
 
-            if (batch_idx + 1) % 100 == 0:
-                print(f"Epoch {epoch + 1}/{num_epochs} Batch {batch_idx + 1}/{len(dataloader)} Loss: {loss.item()}", flush=True)    
+            #if (batch_idx + 1) % 100 == 0:
+            #print(f"Epoch {epoch + 1}/{num_epochs} Batch {batch_idx + 1}/{len(dataloader)} Loss: {loss.item()}", flush=True)    
             
             epoch_loss += loss.item()
 
@@ -235,6 +251,13 @@ def main():
         # Create the model:
         model = CharPredictorRNN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.hidden_dim, args.num_layers)
 
+        # Print out the total number of parameters, then the number of weights and biases for each layer, and the
+        # number of embedding parameters:
+        print(f"Total number of parameters: {sum(p.numel() for p in model.parameters())}", flush=True)
+        for name, param in model.named_parameters():
+            print(f"{name} {param.numel()}", flush=True)
+        print(f"Number of embedding parameters: {sum(p.numel() for p in model.embedding_layer.parameters())}", flush=True)
+        
         # Train the model:
         train_model(model, dataloader, "cuda" if torch.cuda.is_available() else "cpu", args.num_epochs, args.warmup)
 
