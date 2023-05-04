@@ -17,22 +17,30 @@ import sys
 import argparse
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+import time
+import datetime
+# import a learning rate scheduler:
+from torch.optim.lr_scheduler import ExponentialLR
 
 # Specify all global constants that aren't arguments:
 VOCAB_SIZE     = 256
+LEARNING_RATE  = 0.001
+LR_GAMMA       = 0.999
 
 # Specify defaults for all arguments as ALL_CAPS globals:
-MODE           = "train"
-SEED_STR       = "Once upon a tim"
+MODE           = "generate"
+#                 0        1         2         3         4         5         6         7
+#                 1234567890123456789012345678901234567890123456789012345678901234567890
+SEED_STR       = "In the morning, he had gone down to the river (to wash his cloth"
 NUM_CHARS      = 500
-EMBEDDING_LEN  = 16
-SEQ_LEN        = 64
-WARMUP         = 16
-HIDDEN_DIM     = 64
-NUM_LAYERS     = 2
-NUM_EPOCHS     = 40
-BATCH_SIZE     = 32
-MAX_CHARS      = 2**17
+EMBEDDING_LEN  = 32
+SEQ_LEN        = 256
+WARMUP         = 64
+HIDDEN_DIM     = 256
+NUM_LAYERS     = 5
+NUM_EPOCHS     = 1000
+BATCH_SIZE     = 128
+MAX_CHARS      = 2**24
 CORPUS_FILE    = "/data/training_data/gutenberg_corpus_21MB.txt"
 MODEL_FILE     = "trained_rnn.pth"
 
@@ -53,6 +61,48 @@ parser.add_argument('--max_chars',     type=int, default=MAX_CHARS, help='The ma
 parser.add_argument('--corpus_file',   type=str, default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
 parser.add_argument('--model_file',    type=str, default=MODEL_FILE, help='The model file (default: %(default)s)')
 args = parser.parse_args()
+
+# Define the model:
+class CharPredictorRNN(nn.Module):    
+    def __init__(self, vocab_size, embedding_len, seq_len, hidden_dim, num_layers):
+        super(CharPredictorRNN, self).__init__()
+
+        self.vocab_size    = vocab_size
+        self.embedding_len = embedding_len
+        self.seq_len       = seq_len
+        self.hidden_dim    = hidden_dim
+        self.num_layers    = num_layers
+        
+        self.embedding_layer = nn.Embedding(vocab_size, embedding_len)
+        self.rnn             = nn.GRU(input_size  = embedding_len, 
+                                      hidden_size = hidden_dim, 
+                                      num_layers  = self.num_layers, 
+                                      batch_first = True)
+        self.linear          = nn.Linear(hidden_dim, vocab_size)
+        self.softmax         = nn.LogSoftmax(dim=2)
+
+    def forward(self, input_sequence, hidden):
+        # Embed the input sequence:
+        #  embedded is a tensor of size (batch_size, seq_len, embedding_len).
+        embedded = self.embedding_layer(input_sequence)
+
+        # Run the RNN. When the RNN runs on the input_sequence, it will return
+        #   rnn_out, which is a tensor of size (batch_size, seq_len, hidden_dim).
+        #   hidden is a tensor of size (num_layers, batch_size, hidden_dim).
+        rnn_out, hidden = self.rnn(embedded, hidden)
+
+        # Run the linear layer. 
+        #   linear_out is a tensor of size (batch_size, seq_len, vocab_size).
+        linear_out = self.linear(rnn_out)
+
+        # Run the softmax:
+        #   softmax_out is a tensor of size (batch_size, seq_len, vocab_size).
+        softmax_out = self.softmax(linear_out)
+
+        return softmax_out, hidden
+    
+def init_hidden(batch_size, hidden_dim, num_layers):
+    return torch.zeros(num_layers, batch_size, hidden_dim)
 
 # Preprocess the corpus data as raw 8-bit binary data:
 def read_corpus(file_path, max_chars=None):
@@ -108,50 +158,15 @@ def create_dataloader(input_sequences, target_sequences, batch_size):
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     return dataloader
 
-# Define the model:
-class CharPredictorRNN(nn.Module):    
-    def __init__(self, vocab_size, embedding_len, seq_len, hidden_dim, num_layers):
-        super(CharPredictorRNN, self).__init__()
-
-        self.vocab_size    = vocab_size
-        self.embedding_len = embedding_len
-        self.seq_len       = seq_len
-        self.hidden_dim    = hidden_dim
-        self.num_layers    = num_layers
-        
-        self.embedding_layer = nn.Embedding(vocab_size, embedding_len)
-        self.rnn             = nn.RNN(input_size  = embedding_len, 
-                                      hidden_size = hidden_dim, 
-                                      num_layers  = self.num_layers, 
-                                      batch_first = True)
-        self.linear          = nn.Linear(hidden_dim, vocab_size)
-        self.softmax         = nn.LogSoftmax(dim=2)
-
-    def forward(self, input_sequence):
-        # Embed the input sequence:
-        embedded = self.embedding_layer(input_sequence)
-
-        # Run the RNN. When the RNN runs on the input_sequence, it will return
-        #   rnn_out, which is a tensor of size (batch_size, seq_len, hidden_dim).
-        rnn_out, hidden = self.rnn(embedded)
-
-        # Run the linear layer. 
-        #   linear_out is a tensor of size (batch_size, seq_len, vocab_size).
-        linear_out = self.linear(rnn_out)
-
-        # Run the softmax:
-        #  softmax_out is a tensor of size (batch_size, seq_len, vocab_size).
-        softmax_out = self.softmax(linear_out)
-
-        return softmax_out
-
 # Train the model:
 def train_model(model, dataloader, device, num_epochs, warmup):
     model.train()
     model.to(device)
     criterion = nn.NLLLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=0.01, weight_decay=0.01)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
+    scheduler = ExponentialLR(optimizer, gamma=LR_GAMMA)
     for epoch in range(num_epochs):
+        start_time = time.time()
         epoch_loss = 0.0
         for batch_idx, (input_sequences, target_sequences) in enumerate(dataloader):
             # Send the input and target sequences to the device:
@@ -161,15 +176,13 @@ def train_model(model, dataloader, device, num_epochs, warmup):
             # Zero the parameter gradients:
             optimizer.zero_grad()
 
+            # Initialize the hidden state:
+            hidden = init_hidden(args.batch_size, args.hidden_dim, args.num_layers).to(device)
+
             # Forward pass:
-            outputs = model(input_sequences)
+            outputs, hidden = model(input_sequences, hidden)
 
             # Compute the loss:
-            # outputs is a tensor of size (batch_size, seq_len, num_classes), and
-            # target_sequences is a tensor of size (batch_size, seq_len). But I think
-            # NLLLoss() wants outputs to be of size (batch_size*seq_len, num_classes), and
-            # target_sequences needs to be of size (batch_size*seq_len). So we need to
-            # reshape these tensors... but first, we need to ignore the warmup characters in each sequence:
             outputs = outputs[:, warmup:, :]
             target_sequences = target_sequences[:, warmup:]
 
@@ -185,14 +198,27 @@ def train_model(model, dataloader, device, num_epochs, warmup):
             # Update the parameters:
             optimizer.step()
 
-            #if (batch_idx + 1) % 100 == 0:
-            #print(f"Epoch {epoch + 1}/{num_epochs} Batch {batch_idx + 1}/{len(dataloader)} Loss: {loss.item()}", flush=True)    
+            
+            
             
             epoch_loss += loss.item()
 
-            
-        print(f"Epoch {epoch + 1}/{num_epochs} Loss: {epoch_loss / len(dataloader)}", flush=True)
+        old_lr = optimizer.param_groups[0]["lr"]
+        scheduler.step()
+        new_lr = optimizer.param_groups[0]["lr"]
+        stop_time = time.time()
+        elapsed_time = stop_time - start_time
+        remaining_epochs = num_epochs - epoch - 1
+        remaining_time = datetime.timedelta(seconds=remaining_epochs * elapsed_time)
+        end_time = datetime.datetime.now() + remaining_time
+        avg_loss = epoch_loss / len(dataloader)
+        
+        #print(f"Epoch {epoch + 1}/{num_epochs} Loss: {avg_loss:.5f} ETA: {end_time.strftime("%H:%M:%S")}", flush=True)
+        #print(f"Epoch {epoch + 1}/{num_epochs} Loss: {avg_loss:.5f} ETA: {end_time.strftime('{{%H:%M:%S}}')} LR:{old_lr:.5f}->{new_lr:.5f}", flush=True)
+        print(f"Epoch {epoch + 1}/{num_epochs} Loss:{avg_loss:.5f} LR:{old_lr:.5f}->{new_lr:.5f} ETA:{end_time.strftime('%H:%M:%S')} ", flush=True)
 
+
+        
 # Save the model:
 def save_model(model, file_path):
     torch.save(model.state_dict(), file_path)
@@ -203,14 +229,12 @@ def load_model(model, file_path, device):
 
 # Generate text using the model. The seed_str is the initial context.
 #   Note that the length of the seed_str acts as the "warmup". The model will first
-#   be fed with the seed_str, one character at a time. It will maintain its
-#   internal state between characters. After we've fed the whole seed_str, its very
-#   next output will be the first character of the generated text. We will then feed
-#   the character back into the model, and it will output
-#   the next character, and so on. We will do this for num_chars characters.
+#   be fed with the seed_str, one character at a time, as warmup. Then the model
+#   will be fed with its own output, one character at a time to generate the text.
 def generate_text(model, seed_str, num_chars, device, vocab_size):
     model.eval()
     model.to(device)
+    hidden = init_hidden(1, args.hidden_dim, args.num_layers).to(device)
     context = [ord(c) for c in seed_str]
     
     # Feed one character at a time to the model: (warmup)
@@ -219,7 +243,7 @@ def generate_text(model, seed_str, num_chars, device, vocab_size):
         input_tensor = torch.tensor(context[ii], dtype=torch.long).unsqueeze(0).unsqueeze(0).to(device)
 
         # Run the model, but ignore the output for now
-        output = model(input_tensor)
+        output, hidden = model(input_tensor, hidden)
     
     # Now we will feed the final output of the model back into the model, one character at a time:
     generated_text = seed_str
@@ -231,7 +255,7 @@ def generate_text(model, seed_str, num_chars, device, vocab_size):
 
         # Feed the character back into the model:
         input_tensor = torch.tensor(char_idx, dtype=torch.long).unsqueeze(0).unsqueeze(0).to(device)
-        output = model(input_tensor)
+        output, hidden = model(input_tensor, hidden)
 
     return generated_text
 

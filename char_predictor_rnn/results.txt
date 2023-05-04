@@ -1,0 +1,197 @@
+==============================================================================================
+Experiment 1: (GRU)
+-------------------
+    LEARNING_RATE  = 0.0001
+    MODE           = "generate"
+    #                 0        1         2         3         4         5         6         7
+    #                 1234567890123456789012345678901234567890123456789012345678901234567890
+    SEED_STR       = "by the river, and when he returnd home he found a stranger seate"
+    NUM_CHARS      = 500
+    EMBEDDING_LEN  = 32
+    SEQ_LEN        = 256
+    WARMUP         = 64
+    HIDDEN_DIM     = 256
+    NUM_LAYERS     = 5
+    NUM_EPOCHS     = 1000
+    BATCH_SIZE     = 128
+    MAX_CHARS      = 2**24
+    CORPUS_FILE    = "/data/training_data/gutenberg_corpus_21MB.txt"
+    MODEL_FILE     = "trained_rnn.pth"
+
+    Epoch 1000/1000 Loss: 0.9463269745465368
+
+    Generated Text:
+        [by the river, and when he returnd home he found a stranger seate]d
+        on one swoyler, and pushed a sperm while Mrs Wilkins? I have never laid
+        indifferent by white whoreson, who suddenly scaunded into treasure of
+        expectation, I stand, was unintelligible that I should have been waiting
+        to assign this virtue itself, that guests should be at last confident,
+        and provided love because he been so easily talk in his hand--gentlemen,
+        of courrequenching over my hand, so I will not think it not wanderer
+        than the envy till you want: to be sure I am a foreigner stubbo
+        
+        by the river, and when he returnd home he found a stranger seated
+        to quit the country that Rosamond very wrought passid for some valuable
+        hint-,sson, when she staggered in a fit for liburehere. Now we came up.
+        His forged fish; he was by a sum with his nature, greatly with all this
+        fellow makes night, but at letters with the whole thing he should be
+        settled. So curious was no reason to die to sin, he was excited for the
+        time at Marsis had the hilt. Perhaps he of all means shaking him
+        intended in the coacht of the sense over himself that he had nothing
+        
+        by the river, and when he returnd home he found a stranger seated
+        to Mr Jones, and began to refuse a great lady to his worth: âwhat, then
+        I do add my disgraceful humorously living his usual wonder how to tell
+        Romans after much liege. We can make the bad object which I stand avoid
+        their way.--In that late blot before I have the house we shall have
+        possessive velvet, and think it impertinent: yet--Cousrin, is one of
+        his sisters?' (and Strange could--You have any action--Now, Planchet, to
+        give the Nature the goose of life is, to-morrow: for that is new
+        
+        by the river, and when he returnd home he found a stranger seated
+        with compassion for his conduct with him?
+
+        âYes, you may,âthatâs all. Nothing at once attend
+        to arrest you, and because you were about sight to be as yours, it
+        well all out in hand, they look you, and at the sponger or your majestee
+        that it did ever wicker wide southing.âAumbs had been for some time for his sudden statu, 
+        
+        by the river, and when he returnd home he found a stranger seated
+        with shining up, we flattering his powerful masterâs rings, which he
+        personades as in a satisfaction of tender days, in a-hark, seeming a
+        bit of note in the great replying whenever there were in any reward.
+
+        âThe muslin over the room! I have heard the gamester what goes you.âArtagnan.
+
+        âHere you time,âI tell thee, but it was obliged to escape. Be
+        
+        by the river, and when he returnd home he found a stranger seated
+        from his desire and help insoles and his friendship, esteemvenked the
+        account of the Vicar, which was still a taught the other one morning;
+        for the present, the weather was very money; and if it happened to eat
+        the shape of their conversation with the first colour, upon which led to
+        the king, no other ginleenm without now desired to prove their
+        self-abuse. But as he snuffed, in some way dost the Vincy tapers to
+        himself a servant by the one carbunclement in bag of life.
+
+        But as she lon
+
+==============================================================================================
+Experiment 2: (faster learning rate)
+-------------------
+    LEARNING_RATE  = 0.001
+    
+    SEED_STR       = "with fire and sword, and the whole of the cavalry crossing the f"
+    NUM_CHARS      = 500
+    EMBEDDING_LEN  = 32
+    SEQ_LEN        = 256
+    WARMUP         = 64
+    HIDDEN_DIM     = 256
+    NUM_LAYERS     = 5
+    NUM_EPOCHS     = 1000
+    BATCH_SIZE     = 128
+    MAX_CHARS      = 2**24
+    CORPUS_FILE    = "/data/training_data/gutenberg_corpus_21MB.txt"
+    MODEL_FILE     = "trained_rnn.pth"
+
+    Epoch 1000/1000 Loss: 0.8841615855926648
+
+    Generated Text:
+    [with fire and sword, and the whole of the cavalry crossing the f]reezin
+        curl he nor stained isolated hands were expressed his off-bedside,
+        said, as if he became to trust twenty hours of parchmentelâs face,
+        and Aramis.
+
+
+
+
+        CHAPTER II.
+        The stately not the Abserner glorious queen.
+
+        All mine own light, for a fashionable sarvant which penether
+        rebuke air ânot at allroatingâfor though equivocated men are before
+        evident, I will open his sovereity in the empty mind one; fifteen, a
+        minripm: thou wouldst have it corrected out of deep
+
+    [with fire and sword, and the whole of the cavalry crossing the f]eet
+        in once; and did the deep exertible threatened beviler came to flight
+        at the stranger.âOur army had entered the chamber, buckled, bad to be
+        taking the name of misery; and, in two passages the first caustic, in
+        such a bone to paraps, the gentleman all with basins; and though,â
+        It wonders not, made such creatures on being so obligibled soft as was
+        my amphsee. The captain irasted with the life either in the secret,
+        retired to him the risen in Lalison, who all to please the name of
+
+    [In the morning, he had gone down to the river (to wash his cloth]es
+        before it:) they then began to proceed to save him, and he grew his
+        bread. Then mercent got turned the table, about his words, and called
+        himself remarkably neat; a touch of a fence but a net of laughing, and
+        the adversaries to offer it was a relish of hope as though common; and
+        our heroe getting the loathed poting against the money. No more it would
+        believe her,âwhat mere a year coming again! Why, here acts goodiatics
+        more thanified than Kateâthat is timeler, and theyâll tell at
+   
+    [In the morning, he had gone down to the river (to wash his cloth]es
+        above the Gascon! Then fly to that touching the next, hollowly knockists
+        and connoisseurship, which neither the suitormation Athos filled his
+        look, had all entertained himself for one of the morning-mentioning physiognomy.
+        How pleased any thing the duke, have ill that more probed than to more
+        force in the Aunt. Artestal barricaders, and abandoned to expressions of
+        horn-note whether thou darest venture after-ordered for that lady.
+        They were three people, the more this mine comedy have b
+
+
+===================================================================================
+Experiment 3: (learning rate scheduler)
+--------------------------------------
+
+    LEARNING_RATE  = 0.001
+    LR_GAMMA       = 0.999
+
+    SEED_STR       = "In the morning, he had gone down to the river (to wash his cloth"
+    NUM_CHARS      = 500
+    EMBEDDING_LEN  = 32
+    SEQ_LEN        = 256
+    WARMUP         = 64
+    HIDDEN_DIM     = 256
+    NUM_LAYERS     = 5
+    NUM_EPOCHS     = 1000
+    BATCH_SIZE     = 128
+    MAX_CHARS      = 2**24
+    CORPUS_FILE    = "/data/training_data/gutenberg_corpus_21MB.txt"
+    MODEL_FILE     = "trained_rnn.pth"
+    
+    Epoch 1000/1000 Loss:0.87817
+    
+    Generated Text:
+       [In the morning, he had gone down to the river (to wash his cloth]es
+        in the sounding persistently) his own inward plenty itself might;
+        very well the breakfast in the moody life-quidden suit placed much
+        owned that everybody was very treated, as well as in a huge first in being
+        now rushed. Enlappi will Milly were behind God, all the impossibles of
+        all the railinss of Sickâs living plays, the voice swerted up these worst;
+        hourly stratagem.
+
+        Falied with use, such as it spake, a messenger, as they would not have
+        brighter. Thou knowâst the circumstance 
+        
+        
+       [In the morning, he had gone down to the river (to wash his cloth]es, by
+        wine away within an end of a ladies have made in his problem. While we
+        then, on the arm of two kinds of a malice of being under such an appearance,
+        in reading either engrave and admitted we would do.
+
+        Sir, having listened too, that I spoke, it sung in that closer wayâthis
+        ravished way is, I saw the bland they went up. He stood in a stood.
+        In water, till the third moment till boat, I scourged with the fight,
+        finished. Giving the sea of snow and âMisseeze,â
+
+
+       [In the morning, he had gone down to the river (to wash his cloth]est
+        Marizenes) to promise to the parties, during which Sophia, gratified
+        whole time, was great danger, and joy now upon herself too. Fifting the
+        chapel whither was looking gains; and these glading it seemed to have
+        dispersed: as there was no money did she could change all herself; so
+        spare the reach of its usual hilasines, to the whole work he omited it.
+        This certain scheme came to be done the end of the first cloth. She had
+        observed. âAre youâ__
