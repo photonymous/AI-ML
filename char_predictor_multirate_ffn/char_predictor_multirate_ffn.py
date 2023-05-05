@@ -1,13 +1,13 @@
-# This will be a character predicting RNN. It will be trained using a large corpus of
+# This will be a character predicting neural network. From an external vantage point
+# it will behave like the CharPredictorRNN (one char in, one char out, with internal 
+# state). Internally, however, it will be a feed forward multirate architecture, using
+# FIFOs between subnetworks. The subnetworks are connected in a daisy-chain. Each
+# updates at half the rate of the subnetwork before it. As with CharPredictorRNN, 
+# it will be trained using a large corpus of
 # raw text, and will be able to generate new text based on a seed string. It will process
 # one character at a time, and will output a probability distribution over the next
 # character. The output will be a softmax over the vocabulary size (256 characters).
-# It will use a standard RNN, not LSTM or GRU. The input will be embedded, with a
-# specifiable embedding length. The sequence length will be specifiable. The hidden
-# layer will be specifiable. The number of hidden layers will be specifiable. The
-# number of epochs will be specifiable. The batch size will be specifiable. 
-# It will all be in one file, and a command line argument will specify "trian"
-# or "generate". 
+# The input will be embedded, with a specifiable embedding length. 
 
 # Import the libraries we will need:
 import torch
@@ -24,25 +24,25 @@ from torch.optim.lr_scheduler import ExponentialLR
 
 # Specify all global constants that aren't arguments:
 VOCAB_SIZE     = 256
-LEARNING_RATE  = 0.001
-LR_GAMMA       = 0.999
+LEARNING_RATE  = 0.002
+LR_GAMMA       = 1
 
 # Specify defaults for all arguments as ALL_CAPS globals:
-MODE           = "generate"
+MODE           = "train"
 #                 0        1         2         3         4         5         6         7
 #                 1234567890123456789012345678901234567890123456789012345678901234567890
 SEED_STR       = ". Snow rhymes with know, bird rhymes with herd, blue rhymes with"   
 NUM_CHARS      = 500
-EMBEDDING_LEN  = 32
-SEQ_LEN        = 256
-WARMUP         = 64
-HIDDEN_DIM     = 256
-NUM_LAYERS     = 5
-NUM_EPOCHS     = 1000
-BATCH_SIZE     = 128
-MAX_CHARS      = 2**24
+EMBEDDING_LEN  = 16
+SEQ_LEN        = 64
+WARMUP         = 16
+HIDDEN_DIM     = 64
+NUM_LAYERS     = 2
+NUM_EPOCHS     = 40
+BATCH_SIZE     = 64
+MAX_CHARS      = 2**20
 CORPUS_FILE    = "/data/training_data/gutenberg_corpus_21MB.txt"
-MODEL_FILE     = "trained_rnn.pth"
+MODEL_FILE     = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
@@ -63,9 +63,9 @@ parser.add_argument('--model_file',    type=str, default=MODEL_FILE, help='The m
 args = parser.parse_args()
 
 # Define the model:
-class CharPredictorRNN(nn.Module):    
+class CharPredictorMultirateFFN(nn.Module):    
     def __init__(self, vocab_size, embedding_len, seq_len, hidden_dim, num_layers):
-        super(CharPredictorRNN, self).__init__()
+        super(CharPredictorMultirateFFN, self).__init__()
 
         self.vocab_size    = vocab_size
         self.embedding_len = embedding_len
@@ -198,9 +198,6 @@ def train_model(model, dataloader, device, num_epochs, warmup):
             # Update the parameters:
             optimizer.step()
 
-            
-            
-            
             epoch_loss += loss.item()
 
         old_lr = optimizer.param_groups[0]["lr"]
@@ -213,8 +210,6 @@ def train_model(model, dataloader, device, num_epochs, warmup):
         end_time = datetime.datetime.now() + remaining_time
         avg_loss = epoch_loss / len(dataloader)
         
-        #print(f"Epoch {epoch + 1}/{num_epochs} Loss: {avg_loss:.5f} ETA: {end_time.strftime("%H:%M:%S")}", flush=True)
-        #print(f"Epoch {epoch + 1}/{num_epochs} Loss: {avg_loss:.5f} ETA: {end_time.strftime('{{%H:%M:%S}}')} LR:{old_lr:.5f}->{new_lr:.5f}", flush=True)
         print(f"Epoch {epoch + 1}/{num_epochs} Loss:{avg_loss:.5f} LR:{old_lr:.5f}->{new_lr:.5f} ETA:{end_time.strftime('%H:%M:%S')} ", flush=True)
 
 
@@ -273,7 +268,7 @@ def main():
         dataloader = create_dataloader(input_sequences, target_sequences, args.batch_size)
 
         # Create the model:
-        model = CharPredictorRNN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.hidden_dim, args.num_layers)
+        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.hidden_dim, args.num_layers)
 
         # Print out the total number of parameters, then the number of weights and biases for each layer, and the
         # number of embedding parameters:
@@ -289,7 +284,7 @@ def main():
         save_model(model, args.model_file)
     elif args.mode == "generate":
         # Create the model:
-        model = CharPredictorRNN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.hidden_dim, args.num_layers)
+        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.hidden_dim, args.num_layers)
 
         # Load the model:
         load_model(model, args.model_file, "cuda" if torch.cuda.is_available() else "cpu")
@@ -305,10 +300,6 @@ def main():
 # Call the main function:
 if __name__ == "__main__":
     main()
-
-# Here's how to run it:
-#    $ python char_predictor_rnn.py --mode train --num_epochs 40 --batch_size 1024 --max_chars 2**17 --model_file trained_rnn.pth
-#    $ python char_predictor_rnn.py --mode generate --seed_str "Once upon a tim" --num_chars 500 --model_file trained_rnn.pth
 
 
 
