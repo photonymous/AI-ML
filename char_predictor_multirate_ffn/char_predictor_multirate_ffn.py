@@ -1,13 +1,19 @@
 # This will be a character predicting neural network. From an external vantage point
 # it will behave like the CharPredictorRNN (one char in, one char out, with internal 
-# state). Internally, however, it will be a feed forward multirate architecture, using
-# FIFOs between subnetworks. The subnetworks are connected in a daisy-chain. Each
-# updates at half the rate of the subnetwork before it. As with CharPredictorRNN, 
-# it will be trained using a large corpus of
-# raw text, and will be able to generate new text based on a seed string. It will process
-# one character at a time, and will output a probability distribution over the next
-# character. The output will be a softmax over the vocabulary size (256 characters).
-# The input will be embedded, with a specifiable embedding length. 
+# state). Internally, however, it will be structured as follows. There will be 
+# multiple stages. The first stage is a multilayer feedforward neural network that
+# conlvolves along the input data. Its ouptut is updated ever other input sample.
+# The second stage behaves the same way, taking the output of the first stage as
+# input and updating every other sample, so its update rate is 1/4th of the initial
+# input rate. The third stage behaves the same way, taking the output of the second
+# stage as input and updating every other sample, so its update rate is 1/8th of the
+# initial input rate. And so on. The final stage is a prediction network that takes
+# its input from all of the previous stages' most recent outputs, including the
+# embedding layer which provides the initial input to the network. The prediction
+# network is a multilayer feedforward neural network that outputs a probability
+# distribution over the next character. The prediction network is updated every
+# input sample. The prediction network is trained to predict the next character
+# in the sequence. The loss function is the cross entropy loss function. 
 
 # Import the libraries we will need:
 import torch
@@ -30,204 +36,140 @@ VOCAB_SIZE     = 256
 LEARNING_RATE  = 0.001
 LR_GAMMA       = 1
 
+# I need a good variable name for the kernel size of the first convolutional layer. I like to think of it
+# in DSP terms, and in DSP you'd call it the "number of taps" or the "FIR length" or the "filter length"
+# or the "support". But in machine learning you call it the "kernel size". I'm going to call it the
+# "FIFO length" because that's what it is. It's the length of the FIFO that the convolutional layer
+# uses to compute its output. It's the number of input samples that the convolutional layer uses to
+# compute its output. 
+
 # Specify defaults for all arguments as ALL_CAPS globals:
-MODE               = "train"
-#                     0        1         2         3         4         5         6         7
-#                     1234567890123456789012345678901234567890123456789012345678901234567890
-SEED_STR           = "snow rhymes with"   
-NUM_CHARS          = 500
-EMBEDDING_LEN      = 53
-SEQ_LEN            = 59
-WARMUP             = 16
-NUM_EPOCHS         = 40
-FIFO_LEN           = 4
-SUBNET_HIDDEN_DIMS = [[61,67],[71,73]] # <-- This is a list of lists. Each list is the hidden dimensions for a subnet. The number of subnets is the length of this list.
-PRED_HIDDEN_DIMS   = [257]
-BATCH_SIZE         = 79
-MAX_CHARS          = 2**20
-CORPUS_FILE        = "/data/training_data/gutenberg_corpus_21MB.txt"
-MODEL_FILE         = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn.pth"
+MODE                = "train"
+#                      0	1	  2	    3	      4 	5	  6	    7
+#                      1234567890123456789012345678901234567890123456789012345678901234567890
+SEED_STR            = "snow rhymes with"   
+NUM_CHARS           = 500
+EMBEDDING_LEN       = 53
+SEQ_LEN             = 59
+WARMUP              = 16
+NUM_EPOCHS          = 40
+FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
+CONVNET_HIDDEN_DIMS = [[61,67],[71,73]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
+PRED_HIDDEN_DIMS    = [257]
+BATCH_SIZE          = 79
+MAX_CHARS           = 2**20
+CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.txt"
+MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
 parser = argparse.ArgumentParser(description='Train or generate text using a character predicting RNN.')
-parser.add_argument('--mode',               type=str, default=MODE, help='The mode: train or generate (default: %(default)s)')
-parser.add_argument('--seed_str',           type=str, default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
-parser.add_argument('--num_chars',          type=int, default=NUM_CHARS, help='The number of characters to generate (default: %(default)s)')
-parser.add_argument('--embedding_len',      type=int, default=EMBEDDING_LEN, help='The embedding length (default: %(default)s)')
-parser.add_argument('--seq_len',            type=int, default=SEQ_LEN, help='The sequence length (default: %(default)s)')
-parser.add_argument('--warmup',             type=int, default=WARMUP, help='The warmup (default: %(default)s)')
-parser.add_argument('--fifo_len',           type=int, default=FIFO_LEN, help='The FIFO length (default: %(default)s)')
-parser.add_argument('--subnet_hidden_dims', type=int, default=SUBNET_HIDDEN_DIMS, nargs='+', help='The subnet hidden dimensions (default: %(default)s)')
-parser.add_argument('--pred_hidden_dims',   type=int, default=PRED_HIDDEN_DIMS, nargs='+', help='The prediction network hidden dimensions (default: %(default)s)')
-parser.add_argument('--num_epochs',         type=int, default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
-parser.add_argument('--batch_size',         type=int, default=BATCH_SIZE, help='The batch size (default: %(default)s)')
-parser.add_argument('--max_chars',          type=int, default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
-parser.add_argument('--corpus_file',        type=str, default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
-parser.add_argument('--model_file',         type=str, default=MODEL_FILE, help='The model file (default: %(default)s)')
+parser.add_argument('--mode',                type=str, default=MODE, help='The mode: train or generate (default: %(default)s)')
+parser.add_argument('--seed_str',            type=str, default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
+parser.add_argument('--num_chars',           type=int, default=NUM_CHARS, help='The number of characters to generate (default: %(default)s)')
+parser.add_argument('--embedding_len',       type=int, default=EMBEDDING_LEN, help='The embedding length (default: %(default)s)')
+parser.add_argument('--seq_len',             type=int, default=SEQ_LEN, help='The sequence length (default: %(default)s)')
+parser.add_argument('--warmup',              type=int, default=WARMUP, help='The warmup (default: %(default)s)')
+parser.add_argument('--fifo_len',            type=int, default=FIFO_LEN, help='The FIFO length (default: %(default)s)')
+parser.add_argument('--convnet_hidden_dims', type=int, default=CONVNET_HIDDEN_DIMS, nargs='+', help='The convnet hidden dimensions (default: %(default)s)')
+parser.add_argument('--pred_hidden_dims',    type=int, default=PRED_HIDDEN_DIMS, nargs='+', help='The prediction network hidden dimensions (default: %(default)s)')
+parser.add_argument('--num_epochs',          type=int, default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
+parser.add_argument('--batch_size',          type=int, default=BATCH_SIZE, help='The batch size (default: %(default)s)')
+parser.add_argument('--max_chars',           type=int, default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
+parser.add_argument('--corpus_file',         type=str, default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
+parser.add_argument('--model_file',          type=str, default=MODEL_FILE, help='The model file (default: %(default)s)')
 args = parser.parse_args()
 
-# Define the subnetwork class:
-class Subnetwork(nn.Module):
-    def __init__(self, input_size, hidden_dims):
-        super(Subnetwork, self).__init__()
-        
-        layers = [nn.Linear(input_size, hidden_dims[0]), nn.ReLU()]
-        for i in range(len(hidden_dims) - 1):
-            layers.extend([nn.Linear(hidden_dims[i], hidden_dims[i+1]), nn.ReLU()])
-        self.ffn = nn.Sequential(*layers)
-        
-    def forward(self, x):
-        return self.ffn(x)
+# Define the prediction network class. It will iterate over the sequence, and for each character in the sequence,
+# it will predict the next character in the sequence. It will use the output of the last convolutional layer
+# and the output of the embedding layer as input. It will just use one linear layer for now.
+# Also, by pre-declaring the output tensor and iterating over the sequence length, we will automatically
+# be pruning off the last outputs from the convolution, which were invalid for prediction. Our output will
+# have a 1:1 mapping between the input and target sequences.
+class PredNet(nn.Module):
+    def __init__(self, input_dim, hidden_dims, output_dim):
+        super(PredNet, self).__init__()
 
-""" # Define the subnetwork class:
-class Subnetwork(nn.Module):
-    def __init__(self, input_size, hidden_dims, fifo_len):
-        super(Subnetwork, self).__init__()
-        self.fifo_len = fifo_len
+        self.output_dim = output_dim
+
+        # Create the linear layer:
+        self.linear = nn.Linear(in_features=input_dim, out_features=output_dim)
+
+    def forward(self, input1, input2):
+        # input1 is a tensor of shape (batch_size, seq_len, embedding_len)
+        # input2 is a tensor of shape (batch_size, seq_len, convnet_hidden_dims[-1][-1])
+        # output is a tensor of shape (batch_size, seq_len, output_dim)
+
+        batch_size = input1.shape[0]
+        seq_len = input1.shape[1]
+        # Iterate over the sequence:
+        output = torch.zeros(batch_size, seq_len, self.output_dim)
+        for ii in range(seq_len):
+            # Concatenate the input1 and input2 tensors:
+            input = torch.cat((input1[:,ii,:], input2[:,ii,:]), dim=1)
+            # Compute the output:
+            output[:,ii,:] = self.linear(input)
+
+        return output
+    
+
+# Define the multistage convolutional network class.
+# The initial implementation will just be a single stage.
+class MultiStageConvNet(nn.Module):
+    def __init__(self, embedding_len, fifo_len, convnet_hidden_dims):
+        super(MultistageConvNet, self).__init__()
+
+        # Create the convolutional layers.
+        # For now, it will just be a single stage:
+        self.conv1 = nn.Conv1d(in_channels=embedding_len, 
+                               out_channels=convnet_hidden_dims[0][-1], 
+                               kernel_size=fifo_len, 
+                               padding=fifo_len-1)
+        # Create the ReLU activation layers:
+        self.relu1 = nn.ReLU()
+
+    def forward(self, input):
+        # input is a tensor of shape (batch_size, seq_len, embedding_len)
+        # output is a tensor of shape (batch_size, seq_len, convnet_hidden_dims[-1])
+        output = self.conv1(input)
+        output = self.relu1(output)
         
-        layers = [nn.Linear(input_size * fifo_len, hidden_dims[0]), nn.ReLU()]
-        for i in range(len(hidden_dims) - 1):
-            layers.extend([nn.Linear(hidden_dims[i], hidden_dims[i+1]), nn.ReLU()])
-        self.ffn = nn.Sequential(*layers)
-        
-    def forward(self, x):
-        return self.ffn(x) """
+        return output
+
 
 # Define the CharPredictorMultirateFFN class:
 class CharPredictorMultirateFFN(nn.Module):
-    def __init__(self, vocab_size, embedding_len, seq_len, fifo_len, subnet_hidden_dims, pred_hidden_dims):
+    def __init__(self, vocab_size, embedding_len, seq_len, fifo_len, convnet_hidden_dims, pred_hidden_dims):
         super(CharPredictorMultirateFFN, self).__init__()
 
-        self.vocab_size = vocab_size
-        self.embedding_len = embedding_len
-        self.seq_len = seq_len
-        self.num_subnets = len(subnet_hidden_dims)
-        self.subnet_hidden_dims = subnet_hidden_dims
-        self.fifo_len = fifo_len
+        # Create the embedding layer:
+        self.embedding = nn.Embedding(vocab_size, embedding_len)
 
-        self.embedding_layer = nn.Embedding(vocab_size, embedding_len)
+        # Create the multistage convolutional network:
+        self.multistage_convnet = MultiStageConvNet(embedding_len, fifo_len, convnet_hidden_dims)
 
-        # Create the subnets:
-        subnets = [Subnetwork(embedding_len * fifo_len, subnet_hidden_dims[0])]
-        for i in range(1, self.num_subnets):
-            subnets.append(Subnetwork(subnet_hidden_dims[i-1][-1] * fifo_len, subnet_hidden_dims[i]))
-        self.subnets = nn.ModuleList(subnets)
+        # Create the prediction network:
+        self.pred_net = PredNet(convnet_hidden_dims[-1], pred_hidden_dims, vocab_size)
 
-        # The prediction network will take as input the output of each subnet, as well as the output of the embedding layer:
-        prednet_input_size = sum(shd[-1] for shd in subnet_hidden_dims) + embedding_len
-        prednet_layers = [nn.Linear(prednet_input_size, pred_hidden_dims[0]), nn.ReLU()]
-        for i in range(len(pred_hidden_dims) - 1):
-            prednet_layers.extend([nn.Linear(pred_hidden_dims[i], pred_hidden_dims[i+1]), nn.ReLU()])
-        prednet_layers.append(nn.Linear(pred_hidden_dims[-1], vocab_size))
-        self.prediction_network = nn.Sequential(*prednet_layers)
-        self.softmax = nn.LogSoftmax(dim=2)
+        # Create the softmax layer:
+        self.softmax = nn.Softmax(dim=2)
 
-        self.fifos = None
-        self.subnet_out = None # final subnet's output memory element
-
-    def initialize_memory(self, batch_size, device):
-        # TOOD: Should I do requires_grad=True here?
-
-        # The first subnet's FIFO is the fifo_len * embedding_len. The other's are the fifo_len * subnet_hidden_dims[i-1][-1]:
-        self.fifos = [torch.zeros(batch_size, self.embedding_len * self.fifo_len).to(device)]
-        for i in range(1, self.num_subnets):
-            self.fifos.append(torch.zeros(batch_size, self.subnet_hidden_dims[i-1][-1] * self.fifo_len, requires_grad=True).to(device))
-
-        self.subnet_out = torch.zeros(batch_size, self.subnet_hidden_dims[-1][-1], requires_grad=True).to(device)        
-
+    
     def forward(self, input_sequence):
-        if self.fifos is None:
-            self.initialize_memory(input_sequence.size(0), input_sequence.device)
+        # input_sequence is a tensor of shape (batch_size, seq_len)
 
-        embedded = self.embedding_layer(input_sequence) # (batch_size, seq_len, embedding_len)        
-        
-        # Now we need to calculate all the subnet outputs. They are not all updated at the same time.
-        # Each subnet updates at half the rate of the layer below it.
-        # If a subnet is supposed to update, then its output will be pushed into
-        # its respective FIFO, except for the last subnet's output, which will be
-        # saved in a memory element (self.subnet_out). These memories are persistent, so even
-        # if a subnet does not update, its previous outputs will be preserved in its FIFO or
-        # memory element. These are then used to form the input to the prediction network.
-        # Also, we are walking through the sequence one character at a time, but the
-        # prediction network needs to see the entire sequence at once. So we will
-        # need to accumulate the predicition network's output to feed to the softmax.
+        # The output of the embedding layer is a tensor of shape (batch_size, seq_len, embedding_len)
+        embedding_out = self.embedding(input_sequence)
 
-        softmax_input = torch.zeros(input_sequence.size(0), self.seq_len, self.vocab_size).to(input_sequence.device)
+        # The output of the multistage convolutional network is a tensor of shape (batch_size, seq_len, convnet_hidden_dims[-1])
+        convnet_out = self.multistage_convnet(embedding_out)
 
-        for ii in range(self.seq_len):
-            # We always embed the current input and push it into the first subnet's input FIFO:
-            x = embedded[:, ii, :]
-            # Push in new input using the cloing technique from below:
-            fifo_shifted = self.fifos[0][:, self.embedding_len:].clone()
-            self.fifos[0] = torch.cat((fifo_shifted, x), dim=1)
-            #self.fifos[0].roll(-self.embedding_len, dims=1) 
-            #self.fifos[0][:, -self.embedding_len:] = x # TODO: this line is a problem
+        # The output of the prediction network is a tensor of shape (batch_size, seq_len, vocab_size)
+        prednet_out = self.pred_net(embedding_out, convnet_out)
 
-            # Now we walk through the subnets, decide which ones to update, update
-            # them, and push their outputs into their respective FIFOs:
-            for idx, subnet in enumerate(self.subnets):
-                if (ii+1) % (2 ** (idx + 1)) == 0: # Update every 2^(idx+1) inputs
-                    shift_by = self.subnet_hidden_dims[idx][-1]
+        # The output of the softmax layer is a tensor of shape (batch_size, seq_len, vocab_size)
+        softmax_out = self.softmax(prednet_out)
 
-                    # If this is the last subnet...
-                    if idx == self.num_subnets - 1:
-                        # Save its output in a memory element instead of a FIFO:
-                        self.subnet_out = subnet(self.fifos[idx]) # TODO: this line is a problem
-                    else:
-                        # Otherwise, push its output into the next subnet's input FIFO:
-                        #self.fifos[idx+1].roll(-shift_by, dims=1)
-                        #self.fifos[idx+1][:, -shift_by:] = subnet(self.fifos[idx]) # TODO: this line is a problem
-                        # the above lines cause an inplace modification problem messing up the gradients. So instead:
-                        # Compute the output of the subnet
-                        subnet_output = subnet(self.fifos[idx])
-
-                        # Clone the relevant slices of the self.fifos tensor
-                        fifo_shifted = self.fifos[idx+1][:, :-shift_by].clone()
-
-                        # Concatenate the shifted fifo and subnet output along the desired dimension (1 in your case)
-                        new_fifo = torch.cat((fifo_shifted, subnet_output), dim=1)
-
-                        # Update the list of fifos using a list comprehension, replacing only the (idx+1)-th element
-                        self.fifos[idx+1] = new_fifo
-                        #self.fifos = [f if i != (idx+1) else new_fifo for i, f in enumerate(self.fifos)]
-
-
-            # Now we need to form the input to the prediction network. This is the concatenation of
-            # the the most recent element in each FIFO, as well as the final subnet's output. Note that the size
-            # of the prediction network's input is the sum of the sizes of the subnets' outputs, plus
-            # the size of the embedding layer's output. The size of the first element in each FIFO is
-            # the size of the previous subnet's output:
-
-            # pred_net_input needs to be a tuple of size (batch_size, sum(x[-1] for x in subnet_hidden_dims) + embedding_len)
-            # initialize pred_net_input to zeros:
-            pred_net_input = torch.zeros(input_sequence.size(0), sum(x[-1] for x in self.subnet_hidden_dims) + self.embedding_len).to(input_sequence.device)
-            
-            # Now populate pred_net_input.
-            # First, populate it with the most recent element in each FIFO:          
-            start_idx = 0
-            stop_idx = 0
-            for ii in range(self.num_subnets):
-                if ii == 0:
-                    element_size = self.embedding_len
-                else:
-                    element_size = self.subnet_hidden_dims[ii-1][-1]
-                stop_idx += element_size
-                pred_net_input[:, start_idx:stop_idx] = self.fifos[ii][:, -element_size:]
-                start_idx += element_size
-            
-            # Now populate pred_net_input with the final subnet's output:
-            element_size = self.subnet_hidden_dims[-1][-1]
-            stop_idx += element_size            
-            pred_net_input[:, start_idx:stop_idx] = self.subnet_out
-
-            # Now we can feed pred_net_input into the prediction network:
-            linear_out = self.prediction_network(pred_net_input) # (batch_size, vocab_size)
-            # we need to unsqueeze linear_out prior to assigning it to softmax_input:
-            softmax_input[:, ii, :] = linear_out # (batch_size, 1, vocab_size)
-            
-
-        softmax_out = self.softmax(softmax_input) # (batch_size, seq_len, vocab_size)
         return softmax_out
 
 
@@ -394,7 +336,7 @@ def main():
         dataloader = create_dataloader(input_sequences, target_sequences, args.batch_size)
 
         # Create the model:   
-        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.subnet_hidden_dims, args.pred_hidden_dims)
+        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.pred_hidden_dims)
 
 
         # Print out the total number of parameters, then the number of weights and biases for each layer, and the
@@ -411,7 +353,7 @@ def main():
         save_model(model, args.model_file)
     elif args.mode == "generate":
         # Create the model:
-        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.subnet_hidden_dims, args.pred_hidden_dimss)
+        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.pred_hidden_dims)
 
         # Load the model:
         load_model(model, args.model_file, "cuda" if torch.cuda.is_available() else "cpu")
