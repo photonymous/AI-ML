@@ -35,6 +35,7 @@ from torch.optim.lr_scheduler import ExponentialLR
 VOCAB_SIZE     = 256
 LEARNING_RATE  = 0.001
 LR_GAMMA       = 1
+WEIGHT_DECAY   = 0.01
 
 # I need a good variable name for the kernel size of the first convolutional layer. I like to think of it
 # in DSP terms, and in DSP you'd call it the "number of taps" or the "FIR length" or the "filter length"
@@ -47,15 +48,15 @@ LR_GAMMA       = 1
 MODE                = "train"
 #                      0	1	  2	    3	      4 	5	  6	    7
 #                      1234567890123456789012345678901234567890123456789012345678901234567890
-SEED_STR            = "snow rhymes with"   
+SEED_STR            = "there was a young lady named bright who"
 NUM_CHARS           = 500
 EMBEDDING_LEN       = 53
 SEQ_LEN             = 59
 WARMUP              = 16
 NUM_EPOCHS          = 40
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-CONVNET_HIDDEN_DIMS = [[61,67],[71,73]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
-PRED_HIDDEN_DIMS    = [257]
+CONVNET_HIDDEN_DIMS = [[61,67]]#,[71,73]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
+PREDNET_HIDDEN_DIMS = [257]
 BATCH_SIZE          = 79
 MAX_CHARS           = 2**20
 CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.txt"
@@ -72,7 +73,7 @@ parser.add_argument('--seq_len',             type=int, default=SEQ_LEN, help='Th
 parser.add_argument('--warmup',              type=int, default=WARMUP, help='The warmup (default: %(default)s)')
 parser.add_argument('--fifo_len',            type=int, default=FIFO_LEN, help='The FIFO length (default: %(default)s)')
 parser.add_argument('--convnet_hidden_dims', type=int, default=CONVNET_HIDDEN_DIMS, nargs='+', help='The convnet hidden dimensions (default: %(default)s)')
-parser.add_argument('--pred_hidden_dims',    type=int, default=PRED_HIDDEN_DIMS, nargs='+', help='The prediction network hidden dimensions (default: %(default)s)')
+parser.add_argument('--prednet_hidden_dims', type=int, default=PREDNET_HIDDEN_DIMS, nargs='+', help='The prediction network hidden dimensions (default: %(default)s)')
 parser.add_argument('--num_epochs',          type=int, default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
 parser.add_argument('--batch_size',          type=int, default=BATCH_SIZE, help='The batch size (default: %(default)s)')
 parser.add_argument('--max_chars',           type=int, default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
@@ -90,14 +91,22 @@ class PredNet(nn.Module):
     def __init__(self, input_dim, hidden_dims, output_dim):
         super(PredNet, self).__init__()
 
-        self.output_dim = output_dim
+        self.input_dim   = input_dim
+        self.output_dim  = output_dim
+        self.hidden_dims = hidden_dims
 
         # Create the linear layer:
         self.linear = nn.Linear(in_features=input_dim, out_features=output_dim)
 
+        # TODO: Create the hidden layers, and add non-linearities. For now,
+        #       since we just have a single layer, it is linear, since we
+        #       need to feed a softmax into the cross entropy loss function.
+
     def forward(self, input1, input2):
         # input1 is a tensor of shape (batch_size, seq_len, embedding_len)
-        # input2 is a tensor of shape (batch_size, seq_len, convnet_hidden_dims[-1][-1])
+        #     and is the output of the embedding layer
+        # input2 is list of tensors. Each tensor, j, has the shapee (batch_size, seq_len, convnet_hidden_dims[j][-1])
+        #    They are the outputs of the last convolutional layers in each convnet.
         # output is a tensor of shape (batch_size, seq_len, output_dim)
 
         batch_size = input1.shape[0]
@@ -105,9 +114,13 @@ class PredNet(nn.Module):
         # Iterate over the sequence:
         output = torch.zeros(batch_size, seq_len, self.output_dim)
         for ii in range(seq_len):
-            # Concatenate the input1 and input2 tensors:
-            input = torch.cat((input1[:,ii,:], input2[:,ii,:]), dim=1)
-            # Compute the output:
+            # For element in the input sequence, concatenate input1 with all the tensors in input2 
+            # to create input, which will be the input to the PredNet. 
+            # Its shape will be (batch_size, input_dim).
+            input = input1[:,ii,:]
+            for jj in range(len(input2)):
+                input = torch.cat((input, input2[jj][:,ii,:]), dim=1)
+            # Compute the output at sequence position (or time step) ii:
             output[:,ii,:] = self.linear(input)
 
         return output
@@ -131,15 +144,17 @@ class MultiStageConvNet(nn.Module):
     def forward(self, input):
         # input is a tensor of shape (batch_size, seq_len, embedding_len)
         # output is a tensor of shape (batch_size, seq_len, convnet_hidden_dims[-1])
-        output = self.conv1(input)
-        output = self.relu1(output)
+        output = [] # A list of tensors, one for each stage
+        output1 = self.conv1(input)
+        output1 = self.relu1(output)
+        output.append(output1)
         
         return output
 
 
 # Define the CharPredictorMultirateFFN class:
 class CharPredictorMultirateFFN(nn.Module):
-    def __init__(self, vocab_size, embedding_len, seq_len, fifo_len, convnet_hidden_dims, pred_hidden_dims):
+    def __init__(self, vocab_size, embedding_len, seq_len, fifo_len, convnet_hidden_dims, prednet_hidden_dims):
         super(CharPredictorMultirateFFN, self).__init__()
 
         # Create the embedding layer:
@@ -149,7 +164,10 @@ class CharPredictorMultirateFFN(nn.Module):
         self.multistage_convnet = MultiStageConvNet(embedding_len, fifo_len, convnet_hidden_dims)
 
         # Create the prediction network:
-        self.pred_net = PredNet(convnet_hidden_dims[-1], pred_hidden_dims, vocab_size)
+        #   But first, compute the size of the input dimension to the prediction network, which
+        #   is the sum of the embedding length and the size of all of the last convolutional layers:
+        prednet_input_dim = embedding_len + sum([convnet_hidden_dims[ii][-1] for ii in range(len(convnet_hidden_dims))])
+        self.prednet = PredNet(prednet_input_dim, prednet_hidden_dims, vocab_size)
 
         # Create the softmax layer:
         self.softmax = nn.Softmax(dim=2)
@@ -165,7 +183,7 @@ class CharPredictorMultirateFFN(nn.Module):
         convnet_out = self.multistage_convnet(embedding_out)
 
         # The output of the prediction network is a tensor of shape (batch_size, seq_len, vocab_size)
-        prednet_out = self.pred_net(embedding_out, convnet_out)
+        prednet_out = self.prednet(embedding_out, convnet_out)
 
         # The output of the softmax layer is a tensor of shape (batch_size, seq_len, vocab_size)
         softmax_out = self.softmax(prednet_out)
@@ -237,7 +255,7 @@ def train_model(model, dataloader, device, num_epochs, warmup):
         model.train()
         model.to(device)
         criterion = nn.NLLLoss()
-        optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
+        optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
         scheduler = ExponentialLR(optimizer, gamma=LR_GAMMA)
         for epoch in range(num_epochs):
             start_time = time.time()
@@ -323,7 +341,7 @@ def generate_text(model, seed_str, num_chars, device, vocab_size):
     return generated_text
 
 # This is the main function. It first determines the mode,
-# then does what it needs to do based on th emode.
+# then does what it needs to do based on the emode.
 def main():
     if args.mode == "train":
         # Read the corpus:
@@ -336,8 +354,7 @@ def main():
         dataloader = create_dataloader(input_sequences, target_sequences, args.batch_size)
 
         # Create the model:   
-        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.pred_hidden_dims)
-
+        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
 
         # Print out the total number of parameters, then the number of weights and biases for each layer, and the
         # number of embedding parameters:
@@ -353,7 +370,7 @@ def main():
         save_model(model, args.model_file)
     elif args.mode == "generate":
         # Create the model:
-        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.pred_hidden_dims)
+        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
 
         # Load the model:
         load_model(model, args.model_file, "cuda" if torch.cuda.is_available() else "cpu")
