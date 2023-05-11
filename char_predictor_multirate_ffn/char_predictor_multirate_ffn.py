@@ -45,7 +45,7 @@ WEIGHT_DECAY   = 0.01
 # compute its output. 
 
 # Specify defaults for all arguments as ALL_CAPS globals:
-MODE                = "train"
+MODE                = "generate"
 #                      0	1	  2	    3	      4 	5	  6	    7
 #                      1234567890123456789012345678901234567890123456789012345678901234567890
 SEED_STR            = "there was a young lady named bright who"
@@ -328,29 +328,49 @@ def load_model(model, file_path, device):
 #   be fed with the seed_str, one character at a time, as warmup. Then the model
 #   will be fed with its own output, one character at a time to generate the text.
 def generate_text(model, seed_str, num_chars, device, vocab_size):
+    
+    # TODO: Make this more efficient. Right now, it just adds the most recent predicted
+    #  character to the generated text, and then feeds the whole generated text to the 
+    #  model to get the next character.
+    #  So its input gets longer and longer as it runs, and it can't reuse its previous
+    #  computations.
+
     model.eval()
     model.to(device)
     context = [ord(c) for c in seed_str]
     
-    # Feed one character at a time to the model: (warmup)
-    output = None
-    for ii in range(len(context)):
-        input_tensor = torch.tensor(context[ii], dtype=torch.long).unsqueeze(0).unsqueeze(0).to(device)
-
-        # Run the model, but ignore the output for now
-        output = model(input_tensor)
+    # First, we need to feed the model with the seed_str to get the character that it predicts
+    # following seed_str. It is a convolutional model, so we can just feed it the whole seed_str.
+    context_tensor = torch.tensor(context, dtype=torch.long, device=device)
+    context_tensor = context_tensor.unsqueeze(0)
+    outputs = model(context_tensor)
     
-    # Now we will feed the final output of the model back into the model, one character at a time:
-    generated_text = seed_str
-    for ii in range(num_chars):
-        # Sample a character from the output distribution:
-        probs = torch.exp(output).cpu().data.numpy().flatten()
-        char_idx = np.random.choice(vocab_size, p=probs)
-        generated_text += chr(char_idx)
+    # Outputs is the next-character prediction for each character in the seed_str.
+    # We need to get the last prediction, which is the prediction for the last character
+    # in the seed_str:
+    predicted_char = outputs[0, -1, :].argmax().item()
+    context.append(predicted_char)
 
-        # Feed the character back into the model:
-        input_tensor = torch.tensor(char_idx, dtype=torch.long).unsqueeze(0).unsqueeze(0).to(device)
-        output = model(input_tensor)
+    # Now we can start generating the text:
+    generated_text = seed_str + chr(predicted_char)
+    for i in range(num_chars):
+        # We need to feed the model with the new context to get the next
+        # character prediction:
+        context_tensor = torch.tensor(context, dtype=torch.long, device=device)
+        context_tensor = context_tensor.unsqueeze(0)
+        outputs = model(context_tensor)
+
+        # Generate the next character prediction by sampling from the output distribution.
+        # We should be using np.random.choice for this, and the outputs have already been softmaxed:
+        probs = torch.exp(outputs[0,-1,:]).cpu().data.numpy().flatten()
+        predicted_char = np.random.choice(vocab_size, p=probs)
+        
+        context.append(predicted_char)
+
+        print(i, flush=True)
+
+        # Append the predicted character to the generated text:
+        generated_text += chr(predicted_char)
 
     return generated_text
 
