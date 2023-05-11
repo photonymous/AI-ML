@@ -181,8 +181,8 @@ class CharPredictorMultirateFFN(nn.Module):
         prednet_input_dim = embedding_len + sum([convnet_hidden_dims[ii][-1] for ii in range(len(convnet_hidden_dims))])
         self.prednet = PredNet(prednet_input_dim, prednet_hidden_dims, vocab_size)
 
-        # Create the softmax layer:
-        self.softmax = nn.Softmax(dim=2)
+        # Create the softmax layer: 
+        self.softmax = nn.LogSoftmax(dim=2)
 
     
     def forward(self, input_sequence):
