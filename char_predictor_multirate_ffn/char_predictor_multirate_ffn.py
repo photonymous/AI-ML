@@ -103,23 +103,34 @@ class PredNet(nn.Module):
         #       need to feed a softmax into the cross entropy loss function.
 
     def forward(self, input1, input2):
-        # input1 is a tensor of shape (batch_size, seq_len, embedding_len)
+        # input1 is a tensor of shape (batch_size, embedding_len, seq_len)
         #     and is the output of the embedding layer
-        # input2 is list of tensors. Each tensor, j, has the shapee (batch_size, seq_len, convnet_hidden_dims[j][-1])
+        # input2 is list of tensors. Each tensor, j, has the shapee (batch_size, convnet_hidden_dims[j][-1], seq_len + padding)
         #    They are the outputs of the last convolutional layers in each convnet.
         # output is a tensor of shape (batch_size, seq_len, output_dim)
 
         batch_size = input1.shape[0]
-        seq_len = input1.shape[1]
+        seq_len = input1.shape[2]
+        # Create the output tensor which we weill fill in. Note the shape of input1 and input2, and
+        # consider the requirements of the shape needed to feed the linear layer. The output of the
+        # linear layer will be the prediction for the next character in the sequence. Do we need to
+        # ensure the output tensor is on the GPU? No, because the linear layer will be on the GPU,
+        # but the output tensor will be on the CPU. The loss function will be on the CPU, so we will
+        # need to move the output tensor to the CPU before computing the loss.
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        output = torch.zeros(batch_size, seq_len, self.output_dim).to(device)
+
         # Iterate over the sequence:
-        output = torch.zeros(batch_size, seq_len, self.output_dim)
         for ii in range(seq_len):
             # For element in the input sequence, concatenate input1 with all the tensors in input2 
             # to create input, which will be the input to the PredNet. 
-            # Its shape will be (batch_size, input_dim).
-            input = input1[:,ii,:]
+            # The concatenated shape shape will be (batch_size, input_dim).
+            # Consider the shape of input1, having shape (batch_size, embedding_len, seq_len). ii indexes
+            # into the sequence:
+            input = input1[:,:,ii]
             for jj in range(len(input2)):
-                input = torch.cat((input, input2[jj][:,ii,:]), dim=1)
+                input = torch.cat((input, input2[jj][:,:,ii]), dim=1)
+            
             # Compute the output at sequence position (or time step) ii:
             output[:,ii,:] = self.linear(input)
 
@@ -130,7 +141,7 @@ class PredNet(nn.Module):
 # The initial implementation will just be a single stage.
 class MultiStageConvNet(nn.Module):
     def __init__(self, embedding_len, fifo_len, convnet_hidden_dims):
-        super(MultistageConvNet, self).__init__()
+        super(MultiStageConvNet, self).__init__()
 
         # Create the convolutional layers.
         # For now, it will just be a single stage:
@@ -142,11 +153,12 @@ class MultiStageConvNet(nn.Module):
         self.relu1 = nn.ReLU()
 
     def forward(self, input):
-        # input is a tensor of shape (batch_size, seq_len, embedding_len)
-        # output is a tensor of shape (batch_size, seq_len, convnet_hidden_dims[-1])
+        # conv1 wants to be fed with a tensor of shape (batch_size, embedding_len, seq_len)
+        # input is a tensor of shape (batch_size, embedding_len, seq_len)
+        # output is a tensor of shape (batch_size, convnet_hidden_dims[-1], seq_len + padding)
         output = [] # A list of tensors, one for each stage
         output1 = self.conv1(input)
-        output1 = self.relu1(output)
+        output1 = self.relu1(output1)
         output.append(output1)
         
         return output
@@ -175,11 +187,13 @@ class CharPredictorMultirateFFN(nn.Module):
     
     def forward(self, input_sequence):
         # input_sequence is a tensor of shape (batch_size, seq_len)
-
-        # The output of the embedding layer is a tensor of shape (batch_size, seq_len, embedding_len)
+        # The output of the embedding layer is a tensor of shape (batch_size, seq_len, embedding_len)        
         embedding_out = self.embedding(input_sequence)
+        # But we want the output to be of shape (batch_size, embedding_len, seq_len) so that it can be fed into the convolutional layer.
+        # So, we transpose the tensor: 
+        embedding_out = embedding_out.transpose(1,2)
 
-        # The output of the multistage convolutional network is a tensor of shape (batch_size, seq_len, convnet_hidden_dims[-1])
+        # The output of the multistage convolutional network is a tensor of shape (batch_size, convnet_hidden_dims[-1], seq_len + padding)
         convnet_out = self.multistage_convnet(embedding_out)
 
         # The output of the prediction network is a tensor of shape (batch_size, seq_len, vocab_size)
@@ -251,55 +265,55 @@ def create_dataloader(input_sequences, target_sequences, batch_size):
 
 # Train the model:
 def train_model(model, dataloader, device, num_epochs, warmup):
-    with torch.autograd.set_detect_anomaly(True):
-        model.train()
-        model.to(device)
-        criterion = nn.NLLLoss()
-        optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-        scheduler = ExponentialLR(optimizer, gamma=LR_GAMMA)
-        for epoch in range(num_epochs):
-            start_time = time.time()
-            epoch_loss = 0.0
-            for batch_idx, (input_sequences, target_sequences) in enumerate(dataloader):
-                # Send the input and target sequences to the device:
-                input_sequences  = input_sequences.to(device)
-                target_sequences = target_sequences.to(device)
+    #with torch.autograd.set_detect_anomaly(True):
+    model.train()
+    model.to(device)
+    criterion = nn.NLLLoss()
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    scheduler = ExponentialLR(optimizer, gamma=LR_GAMMA)
+    for epoch in range(num_epochs):
+        start_time = time.time()
+        epoch_loss = 0.0
+        for batch_idx, (input_sequences, target_sequences) in enumerate(dataloader):
+            # Send the input and target sequences to the device:
+            input_sequences  = input_sequences.to(device)
+            target_sequences = target_sequences.to(device)
 
-                # Zero the parameter gradients:
-                optimizer.zero_grad()
+            # Zero the parameter gradients:
+            optimizer.zero_grad()
 
-                # Forward pass:
-                outputs = model(input_sequences)
+            # Forward pass:
+            outputs = model(input_sequences)
 
-                # Compute the loss:
-                outputs = outputs[:, warmup:, :]
-                target_sequences = target_sequences[:, warmup:]
+            # Compute the loss:
+            outputs = outputs[:, warmup:, :]
+            target_sequences = target_sequences[:, warmup:]
 
-                # Now reshape the outputs and targets:            
-                outputs = outputs.reshape(-1, VOCAB_SIZE)
-                target_sequences = target_sequences.reshape(-1)
+            # Now reshape the outputs and targets:            
+            outputs = outputs.reshape(-1, VOCAB_SIZE)
+            target_sequences = target_sequences.reshape(-1)
 
-                loss = criterion(outputs, target_sequences)
+            loss = criterion(outputs, target_sequences)
 
-                # Backward pass:
-                loss.backward()
+            # Backward pass:
+            loss.backward()
 
-                # Update the parameters:
-                optimizer.step()
+            # Update the parameters:
+            optimizer.step()
 
-                epoch_loss += loss.item()
+            epoch_loss += loss.item()
 
-            old_lr = optimizer.param_groups[0]["lr"]
-            scheduler.step()
-            new_lr = optimizer.param_groups[0]["lr"]
-            stop_time = time.time()
-            elapsed_time = stop_time - start_time
-            remaining_epochs = num_epochs - epoch - 1
-            remaining_time = datetime.timedelta(seconds=remaining_epochs * elapsed_time)
-            end_time = datetime.datetime.now() + remaining_time
-            avg_loss = epoch_loss / len(dataloader)
-            
-            print(f"Epoch {epoch + 1}/{num_epochs} Loss:{avg_loss:.5f} LR:{old_lr:.5f}->{new_lr:.5f} ETA:{end_time.strftime('%H:%M:%S')} ", flush=True)
+        old_lr = optimizer.param_groups[0]["lr"]
+        scheduler.step()
+        new_lr = optimizer.param_groups[0]["lr"]
+        stop_time = time.time()
+        elapsed_time = stop_time - start_time
+        remaining_epochs = num_epochs - epoch - 1
+        remaining_time = datetime.timedelta(seconds=remaining_epochs * elapsed_time)
+        end_time = datetime.datetime.now() + remaining_time
+        avg_loss = epoch_loss / len(dataloader)
+        
+        print(f"Epoch {epoch + 1}/{num_epochs} Loss:{avg_loss:.5f} LR:{old_lr:.5f}->{new_lr:.5f} ETA:{end_time.strftime('%H:%M:%S')} ", flush=True)
 
 # Save the model:
 def save_model(model, file_path):
@@ -361,7 +375,6 @@ def main():
         print(f"Total number of parameters: {sum(p.numel() for p in model.parameters())}", flush=True)
         for name, param in model.named_parameters():
             print(f"{name} {param.numel()}", flush=True)
-        print(f"Number of embedding parameters: {sum(p.numel() for p in model.embedding_layer.parameters())}", flush=True)
         
         # Train the model:
         train_model(model, dataloader, "cuda" if torch.cuda.is_available() else "cpu", args.num_epochs, args.warmup)
