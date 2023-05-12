@@ -26,8 +26,13 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import time
 import datetime
-# import a learning rate scheduler:
 from torch.optim.lr_scheduler import ExponentialLR
+import torch.jit
+from typing import List
+from torch import Tensor
+import cProfile
+import pstats
+
 
 # 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97
 
@@ -45,7 +50,7 @@ WEIGHT_DECAY   = 0.01
 # compute its output. 
 
 # Specify defaults for all arguments as ALL_CAPS globals:
-MODE                = "generate"
+MODE                = "train"
 #                      0	1	  2	    3	      4 	5	  6	    7
 #                      1234567890123456789012345678901234567890123456789012345678901234567890
 SEED_STR            = "there was a young lady named bright who"
@@ -81,6 +86,43 @@ parser.add_argument('--corpus_file',         type=str, default=CORPUS_FILE, help
 parser.add_argument('--model_file',          type=str, default=MODEL_FILE, help='The model file (default: %(default)s)')
 args = parser.parse_args()
 
+# Define a JITed function for create_input_tensor(input1, input2, seq_len):
+#@torch.jit.script
+# def create_input_tensor(input1: Tensor, input2: List[Tensor], seq_len: int) -> Tensor:
+#     input = torch.cat((input1[:,:,0], input2[0][:,:,0]), dim=1)
+#     # Change the dimension of the input so we can iteratively concatentate along a third dimension:
+#     input = input.unsqueeze(2)
+#     # Now iterate over the sequence, concatinating input1 and input2 as before, and concatenating
+#     # the result to the input tensor along the third dimension:
+#     for ii in range(1, seq_len):
+#         input = torch.cat((input, torch.cat((input1[:,:,ii], input2[0][:,:,ii]), dim=1).unsqueeze(2)), dim=2)            
+#     input = input.transpose(1,2)
+#     return input
+
+# @torch.jit.script
+# def create_input_tensor(input1: Tensor, input2: List[Tensor], seq_len: int) -> Tensor:
+#     batch_size = input1.shape[0]
+#     input_dim = input1.shape[1] + input2[0].shape[1]
+#     # Preallocate the tensor
+#     input = torch.zeros(batch_size, input_dim, seq_len, device=input1.device)    
+    
+#     # # Even slower than cat():
+#     # input_dim1 = input1.shape[1]
+#     # input_dim2 = input2[0].shape[1]  
+#     #  for ii in range(seq_len):
+#     #     input[:,:input_dim1,ii] = input1[:,:,ii]
+#     #     input[:,input_dim1:input_dim1+input_dim2,ii] = input2[0][:,:,ii]
+
+#     # Each iteration of the for loop creates a separate node in the computational graph,
+#     # so using a for loop is always going to be slow. 
+#     for ii in range(seq_len):
+#         input[:,:,ii] = torch.cat((input1[:,:,ii], input2[0][:,:,ii]), dim=1)
+    
+#     input = input.transpose(1,2)
+#     return input
+
+
+
 # Define the prediction network class. It will iterate over the sequence, and for each character in the sequence,
 # it will predict the next character in the sequence. It will use the output of the last convolutional layer
 # and the output of the embedding layer as input. It will just use one linear layer for now.
@@ -101,7 +143,7 @@ class PredNet(nn.Module):
         # TODO: Create the hidden layers, and add non-linearities. For now,
         #       since we just have a single layer, it is linear, since we
         #       need to feed a softmax into the cross entropy loss function.
-
+      
     def forward(self, input1, input2):
         # input1 is a tensor of shape (batch_size, embedding_len, seq_len)
         #     and is the output of the embedding layer
@@ -111,31 +153,61 @@ class PredNet(nn.Module):
 
         batch_size = input1.shape[0]
         seq_len = input1.shape[2]
-        # Create the output tensor which we weill fill in. Note the shape of input1 and input2, and
-        # consider the requirements of the shape needed to feed the linear layer. The output of the
-        # linear layer will be the prediction for the next character in the sequence. Do we need to
-        # ensure the output tensor is on the GPU? No, because the linear layer will be on the GPU,
-        # but the output tensor will be on the CPU. The loss function will be on the CPU, so we will
-        # need to move the output tensor to the CPU before computing the loss.
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        output = torch.zeros(batch_size, seq_len, self.output_dim).to(device)
 
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+        # ==============================
         # Iterate over the sequence:
-        for ii in range(seq_len):
-            # For element in the input sequence, concatenate input1 with all the tensors in input2 
-            # to create input, which will be the input to the PredNet. 
-            # The concatenated shape shape will be (batch_size, input_dim).
-            # Consider the shape of input1, having shape (batch_size, embedding_len, seq_len). ii indexes
-            # into the sequence:
-            input = input1[:,:,ii]
-            for jj in range(len(input2)):
-                input = torch.cat((input, input2[jj][:,:,ii]), dim=1)
+        # output = torch.zeros(batch_size, seq_len, self.output_dim).to(device)
+        # for ii in range(seq_len):
+        #     # For element in the input sequence, concatenate input1 with all the tensors in input2 
+        #     # to create input, which will be the input to the PredNet. 
+        #     # The concatenated shape shape will be (batch_size, input_dim).           
+        #     input = input1[:,:,ii]
+        #     for jj in range(len(input2)):
+        #         input = torch.cat((input, input2[jj][:,:,ii]), dim=1)
             
-            # Compute the output at sequence position (or time step) ii:
-            output[:,ii,:] = self.linear(input)
+        #     # Compute the output at sequence position (or time step) ii:
+        #     output[:,ii,:] = self.linear(input)
+
+        #===============================
+        # EXPERIMENTAL: WON'T WORK WHEN WE SCALE UP THE ALGORITHM TO USE MORE THAN ONE CONVNET AND DECIMATION.
+        # Instead of a nested for-loop, just use tensor operations to create "input".
+        # Concatenate input1 and input2[0] along the 2nd dimension, but only from 0 to seq_len:
+        # TODO: Once we add more stages and decimation, we'll need a for loop to build up the input tensor.
+        #       We will use repeat_interleave() to upsample the decimated convnet outputs to the same length.
+        #       We will not iterate over the sequence elements. Instead, we will iterate over the convnets.
+        #       Once the context length is too long, we will need to chunk it up and iterate over chunks of
+        #       sequence elements, so this will need a second for loop.
+        input = torch.cat((input1[:,:,:seq_len], input2[0][:,:,:seq_len]), dim=1)
+
+        # Transpose the result to make the shape (batch_size, seq_len, input_dim):
+        input = input.transpose(1,2)
+
+        #===============================
+        # do the same thing as above (under "EXPERIMENTAL"), but use nested for loops to create "input"
+        # instead of tensor operations. This will be slower, but will work when we scale up the algorithm.
+        # We will build up input one sequence index at a time, concatenating as we go.
+        # Start by concatenating the first seuqence index from input1 and input2:
+        # input = torch.cat((input1[:,:,0], input2[0][:,:,0]), dim=1)
+        # # Change the dimension of the input so we can iteratively concatentate along a third dimension:
+        # input = input.unsqueeze(2)
+        # # Now iterate over the sequence, concatinating input1 and input2 as before, and concatenating
+        # # the result to the input tensor along the third dimension:
+        # for ii in range(1, seq_len):
+        #     input = torch.cat((input, torch.cat((input1[:,:,ii], input2[0][:,:,ii]), dim=1).unsqueeze(2)), dim=2)            
+        # input = input.transpose(1,2)
+
+        #===============================
+        # # Call a JITed function to create the input tensor:
+        # input = create_input_tensor(input1, input2, seq_len)
+
+
+        output = self.linear(input)
 
         return output
     
+
 
 # Define the multistage convolutional network class.
 # The initial implementation will just be a single stage.
@@ -283,7 +355,9 @@ def train_model(model, dataloader, device, num_epochs, warmup):
             optimizer.zero_grad()
 
             # Forward pass:
+            #with torch.profiler.profile(record_shapes=True) as prof:
             outputs = model(input_sequences)
+            #print(prof.key_averages().table(sort_by="cpu_time_total"))
 
             # Compute the loss:
             outputs = outputs[:, warmup:, :]
@@ -313,7 +387,8 @@ def train_model(model, dataloader, device, num_epochs, warmup):
         end_time = datetime.datetime.now() + remaining_time
         avg_loss = epoch_loss / len(dataloader)
         
-        print(f"Epoch {epoch + 1}/{num_epochs} Loss:{avg_loss:.5f} LR:{old_lr:.5f}->{new_lr:.5f} ETA:{end_time.strftime('%H:%M:%S')} ", flush=True)
+        print(f"Epoch {epoch + 1}/{num_epochs} Loss:{avg_loss:.5f} LR:{old_lr:.5f}->{new_lr:.5f} dT:{elapsed_time:6.2f} ETA:{end_time.strftime('%H:%M:%S')} ", flush=True)
+
 
 # Save the model:
 def save_model(model, file_path):
@@ -418,7 +493,11 @@ def main():
 
 # Call the main function:
 if __name__ == "__main__":
+    #with cProfile.Profile() as pr:
     main()
+
+    #pr.print_stats(sort="time")
+
 
 
 
