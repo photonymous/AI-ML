@@ -27,7 +27,7 @@ from torch.utils.data import Dataset, DataLoader
 import time
 import datetime
 from torch.optim.lr_scheduler import ExponentialLR
-import torch.jit
+#import torch.jit
 from typing import List
 from torch import Tensor
 import cProfile
@@ -50,17 +50,17 @@ WEIGHT_DECAY   = 0.01
 # compute its output. 
 
 # Specify defaults for all arguments as ALL_CAPS globals:
-MODE                = "train"
+MODE                = "generate"
 #                      0	1	  2	    3	      4 	5	  6	    7
 #                      1234567890123456789012345678901234567890123456789012345678901234567890
 SEED_STR            = "there was a young lady named bright who"
 NUM_CHARS           = 500
 EMBEDDING_LEN       = 53
-SEQ_LEN             = 59
+SEQ_LEN             = 59 # TODO: This should eventually be a power of 2. And we'll need a CHUNK_LEN that is a power of 2 as well.
 WARMUP              = 16
 NUM_EPOCHS          = 40
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-CONVNET_HIDDEN_DIMS = [[61,67]]#,[71,73]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
+CONVNET_HIDDEN_DIMS = [[61,67],[71,73]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
 PREDNET_HIDDEN_DIMS = [257]
 BATCH_SIZE          = 79
 MAX_CHARS           = 2**20
@@ -85,42 +85,6 @@ parser.add_argument('--max_chars',           type=int, default=MAX_CHARS, help='
 parser.add_argument('--corpus_file',         type=str, default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
 parser.add_argument('--model_file',          type=str, default=MODEL_FILE, help='The model file (default: %(default)s)')
 args = parser.parse_args()
-
-# Define a JITed function for create_input_tensor(input1, input2, seq_len):
-#@torch.jit.script
-# def create_input_tensor(input1: Tensor, input2: List[Tensor], seq_len: int) -> Tensor:
-#     input = torch.cat((input1[:,:,0], input2[0][:,:,0]), dim=1)
-#     # Change the dimension of the input so we can iteratively concatentate along a third dimension:
-#     input = input.unsqueeze(2)
-#     # Now iterate over the sequence, concatinating input1 and input2 as before, and concatenating
-#     # the result to the input tensor along the third dimension:
-#     for ii in range(1, seq_len):
-#         input = torch.cat((input, torch.cat((input1[:,:,ii], input2[0][:,:,ii]), dim=1).unsqueeze(2)), dim=2)            
-#     input = input.transpose(1,2)
-#     return input
-
-# @torch.jit.script
-# def create_input_tensor(input1: Tensor, input2: List[Tensor], seq_len: int) -> Tensor:
-#     batch_size = input1.shape[0]
-#     input_dim = input1.shape[1] + input2[0].shape[1]
-#     # Preallocate the tensor
-#     input = torch.zeros(batch_size, input_dim, seq_len, device=input1.device)    
-    
-#     # # Even slower than cat():
-#     # input_dim1 = input1.shape[1]
-#     # input_dim2 = input2[0].shape[1]  
-#     #  for ii in range(seq_len):
-#     #     input[:,:input_dim1,ii] = input1[:,:,ii]
-#     #     input[:,input_dim1:input_dim1+input_dim2,ii] = input2[0][:,:,ii]
-
-#     # Each iteration of the for loop creates a separate node in the computational graph,
-#     # so using a for loop is always going to be slow. 
-#     for ii in range(seq_len):
-#         input[:,:,ii] = torch.cat((input1[:,:,ii], input2[0][:,:,ii]), dim=1)
-    
-#     input = input.transpose(1,2)
-#     return input
-
 
 
 # Define the prediction network class. It will iterate over the sequence, and for each character in the sequence,
@@ -156,85 +120,99 @@ class PredNet(nn.Module):
 
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        # ==============================
-        # Iterate over the sequence:
-        # output = torch.zeros(batch_size, seq_len, self.output_dim).to(device)
-        # for ii in range(seq_len):
-        #     # For element in the input sequence, concatenate input1 with all the tensors in input2 
-        #     # to create input, which will be the input to the PredNet. 
-        #     # The concatenated shape shape will be (batch_size, input_dim).           
-        #     input = input1[:,:,ii]
-        #     for jj in range(len(input2)):
-        #         input = torch.cat((input, input2[jj][:,:,ii]), dim=1)
-            
-        #     # Compute the output at sequence position (or time step) ii:
-        #     output[:,ii,:] = self.linear(input)
-
+        
         #===============================
         # EXPERIMENTAL: WON'T WORK WHEN WE SCALE UP THE ALGORITHM TO USE MORE THAN ONE CONVNET AND DECIMATION.
         # Instead of a nested for-loop, just use tensor operations to create "input".
-        # Concatenate input1 and input2[0] along the 2nd dimension, but only from 0 to seq_len:
-        # TODO: Once we add more stages and decimation, we'll need a for loop to build up the input tensor.
+        # Concatenate input1 and the tensors in input2 along the 2nd dimension, but only from 0 to seq_len:
+        # TODO: Once we add decimation, we'll need a for loop to build up the input tensor.
         #       We will use repeat_interleave() to upsample the decimated convnet outputs to the same length.
-        #       We will not iterate over the sequence elements. Instead, we will iterate over the convnets.
         #       Once the context length is too long, we will need to chunk it up and iterate over chunks of
         #       sequence elements, so this will need a second for loop.
-        input = torch.cat((input1[:,:,:seq_len], input2[0][:,:,:seq_len]), dim=1)
-
+        # Construct a tuple containing input1[:,:,:seq_len] and all the tensors in input2 indexed at [:,:,:seq_len]:
+        tuple_of_tensors = (input1[:,:,:seq_len],) + tuple(input2[jj][:,:,:seq_len] for jj in range(len(input2)))
+        # Concatenate the tensors in the tuple along the 2nd dimension:
+        input = torch.cat(tuple_of_tensors, dim=1)
         # Transpose the result to make the shape (batch_size, seq_len, input_dim):
         input = input.transpose(1,2)
-
-        #===============================
-        # do the same thing as above (under "EXPERIMENTAL"), but use nested for loops to create "input"
-        # instead of tensor operations. This will be slower, but will work when we scale up the algorithm.
-        # We will build up input one sequence index at a time, concatenating as we go.
-        # Start by concatenating the first seuqence index from input1 and input2:
-        # input = torch.cat((input1[:,:,0], input2[0][:,:,0]), dim=1)
-        # # Change the dimension of the input so we can iteratively concatentate along a third dimension:
-        # input = input.unsqueeze(2)
-        # # Now iterate over the sequence, concatinating input1 and input2 as before, and concatenating
-        # # the result to the input tensor along the third dimension:
-        # for ii in range(1, seq_len):
-        #     input = torch.cat((input, torch.cat((input1[:,:,ii], input2[0][:,:,ii]), dim=1).unsqueeze(2)), dim=2)            
-        # input = input.transpose(1,2)
-
-        #===============================
-        # # Call a JITed function to create the input tensor:
-        # input = create_input_tensor(input1, input2, seq_len)
-
 
         output = self.linear(input)
 
         return output
-    
+
+
+# It would be more elegant if we had a ConvNetStage class, and a MultiStageConvNet class that
+# contained a list of ConvNetStage objects. Lets define the ConvNetStage class first.
+class ConvNetStage(nn.Module):
+    def __init__(self, input_dim, fifo_len, hidden_dims):
+        super(ConvNetStage, self).__init__()
+        
+        # define the members:
+        self.input_dim   = input_dim
+        self.fifo_len    = fifo_len
+        self.hidden_dims = hidden_dims
+
+        # define the layers:
+        self.conv_layers = nn.ModuleList()
+        self.relu_layers = nn.ModuleList()
+
+        # Create the first layer:
+        self.conv_layers.append(nn.Conv1d(in_channels=input_dim, out_channels=hidden_dims[0], kernel_size=fifo_len, padding=fifo_len-1))
+        self.relu_layers.append(nn.ReLU())
+        # Create the rest of the layers:
+        for ii in range(1, len(hidden_dims)):
+            self.conv_layers.append(nn.Conv1d(in_channels=hidden_dims[ii-1], out_channels=hidden_dims[ii], kernel_size=1))
+            self.relu_layers.append(nn.ReLU())
+
+    def forward(self, input):
+        # input is a tensor of shape (batch_size, input_dim, seq_len)
+        # output is a tensor of shape (batch_size, hidden_dims[-1], seq_len + padding)
+        output = input
+        for ii in range(len(self.conv_layers)):
+            output = self.conv_layers[ii](output)
+            output = self.relu_layers[ii](output)
+        return output
 
 
 # Define the multistage convolutional network class.
-# The initial implementation will just be a single stage.
 class MultiStageConvNet(nn.Module):
     def __init__(self, embedding_len, fifo_len, convnet_hidden_dims):
         super(MultiStageConvNet, self).__init__()
-
-        # Create the convolutional layers.
-        # For now, it will just be a single stage:
-        self.conv1 = nn.Conv1d(in_channels=embedding_len, 
-                               out_channels=convnet_hidden_dims[0][-1], 
-                               kernel_size=fifo_len, 
-                               padding=fifo_len-1)
-        # Create the ReLU activation layers:
-        self.relu1 = nn.ReLU()
-
-    def forward(self, input):
-        # conv1 wants to be fed with a tensor of shape (batch_size, embedding_len, seq_len)
-        # input is a tensor of shape (batch_size, embedding_len, seq_len)
-        # output is a tensor of shape (batch_size, convnet_hidden_dims[-1], seq_len + padding)
-        output = [] # A list of tensors, one for each stage
-        output1 = self.conv1(input)
-        output1 = self.relu1(output1)
-        output.append(output1)
+        # convenet_hidden_dims description:
+        #    [[61,67]],[71,73]] means there are two stages. Each stage has two layers.
+        #    The first layer in the first stage has 61 output features. 
+        #    The second layer in the last stage has 73 output features. Etc.
+        # The first layer in each stage will have a kernel size of fifo_len, and
+        # the rest of the layers in the stage will have a kernel size of 1.
         
-        return output
-
+        # TODO: Add decimation.        
+        
+        # Create all the stages. We will use a list to hold the stages:
+        self.convnet_hidden_dims = convnet_hidden_dims
+        self.stages = nn.ModuleList()
+        for ii in range(len(convnet_hidden_dims)):
+            # The input dimension to the first stage is the embedding length:
+            if ii == 0:
+                input_dim = embedding_len
+            else:
+                input_dim = convnet_hidden_dims[ii-1][-1]
+            # Create the stage:
+            self.stages.append(ConvNetStage(input_dim, fifo_len, convnet_hidden_dims[ii]))
+        
+        
+    def forward(self, x):
+        # Create a container to hold the stage outputs:
+        stage_outputs = []
+        # Iterate over the stages:
+        for ii in range(len(self.stages)):
+            # Get the output from this stage:
+            x = self.stages[ii](x)
+            # Append the output to the list:
+            stage_outputs.append(x)
+            
+        # Return the list of stage outputs:
+        return stage_outputs
+    
 
 # Define the CharPredictorMultirateFFN class:
 class CharPredictorMultirateFFN(nn.Module):
