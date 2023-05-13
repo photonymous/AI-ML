@@ -50,20 +50,20 @@ WEIGHT_DECAY   = 0.01
 # compute its output. 
 
 # Specify defaults for all arguments as ALL_CAPS globals:
-MODE                = "generate"
+MODE                = "train"
 #                      0	1	  2	    3	      4 	5	  6	    7
 #                      1234567890123456789012345678901234567890123456789012345678901234567890
-SEED_STR            = "there was a young lady named bright who"
+SEED_STR            = "there was a young lady named bright who ate "
 NUM_CHARS           = 500
-EMBEDDING_LEN       = 53
-SEQ_LEN             = 59 # TODO: This should eventually be a power of 2. And we'll need a CHUNK_LEN that is a power of 2 as well.
+EMBEDDING_LEN       = 32
+SEQ_LEN             = 64 
 WARMUP              = 16
-NUM_EPOCHS          = 40
+NUM_EPOCHS          = 50
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-CONVNET_HIDDEN_DIMS = [[61,67],[71,73]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
-PREDNET_HIDDEN_DIMS = [257]
-BATCH_SIZE          = 79
-MAX_CHARS           = 2**20
+CONVNET_HIDDEN_DIMS = [[128,128],[128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
+PREDNET_HIDDEN_DIMS = [320]
+BATCH_SIZE          = 128
+MAX_CHARS           = 2**21
 CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.txt"
 MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn.pth"
 
@@ -114,11 +114,6 @@ class PredNet(nn.Module):
             current_in_dim = self.hidden_dims[i]
         layers.append(nn.Linear(current_in_dim, self.output_dim))
 
-        # layers.append(nn.Linear(self.input_dim, self.hidden_dims[0]))
-        # for i in range(1, len(self.hidden_dims)):
-        #     layers.append(nn.ReLU())
-        #     layers.append(nn.Linear(self.hidden_dims[i-1], self.hidden_dims[i]))
-
         self.layers = nn.Sequential(*layers)
 
 
@@ -131,16 +126,8 @@ class PredNet(nn.Module):
         #    They are the outputs of the last convolutional layers in each convnet.
         # output is a tensor of shape (batch_size, seq_len, output_dim)
 
-        batch_size = input1.shape[0]
         seq_len = input1.shape[2]
 
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-        
-        #===============================
-        # EXPERIMENTAL: WON'T WORK WHEN WE SCALE UP THE ALGORITHM TO USE MORE THAN ONE CONVNET AND DECIMATION.
-        # Instead of a nested for-loop, just use tensor operations to create "input".
-        # Concatenate input1 and the tensors in input2 along the 2nd dimension, but only from 0 to seq_len:
         # TODO: Once we add decimation, we'll need a for loop to build up the input tensor.
         #       We will use repeat_interleave() to upsample the decimated convnet outputs to the same length.
         #       Once the context length is too long, we will need to chunk it up and iterate over chunks of
@@ -436,10 +423,11 @@ def generate_text(model, seed_str, num_chars, device, vocab_size):
         
         context.append(predicted_char)
 
-        print(i, flush=True)
+        print(i, flush=True, end=" ")
 
         # Append the predicted character to the generated text:
         generated_text += chr(predicted_char)
+    print("\n")
 
     return generated_text
 
