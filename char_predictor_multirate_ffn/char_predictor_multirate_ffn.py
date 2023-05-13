@@ -101,12 +101,28 @@ class PredNet(nn.Module):
         self.output_dim  = output_dim
         self.hidden_dims = hidden_dims
 
-        # Create the linear layer:
-        self.linear = nn.Linear(in_features=input_dim, out_features=output_dim)
+        # Create the layers using a list and Sequential(). We need ReLU() between the linear layers, but the
+        # last layer should not have a ReLU() after it because we want the output to be a probability distribution
+        # and softmax will be applied to it later in before the loss function. Also, the last layer should have
+        # dimensionality equal to the number of characters in the vocabulary and is its own special layer. If
+        # hidden_dims is empty we will still have this output layer.
+        layers = []
+        current_in_dim = self.input_dim
+        for i in range(len(self.hidden_dims)):
+            layers.append(nn.Linear(current_in_dim, self.hidden_dims[i]))
+            layers.append(nn.ReLU())
+            current_in_dim = self.hidden_dims[i]
+        layers.append(nn.Linear(current_in_dim, self.output_dim))
 
-        # TODO: Create the hidden layers, and add non-linearities. For now,
-        #       since we just have a single layer, it is linear, since we
-        #       need to feed a softmax into the cross entropy loss function.
+        # layers.append(nn.Linear(self.input_dim, self.hidden_dims[0]))
+        # for i in range(1, len(self.hidden_dims)):
+        #     layers.append(nn.ReLU())
+        #     layers.append(nn.Linear(self.hidden_dims[i-1], self.hidden_dims[i]))
+
+        self.layers = nn.Sequential(*layers)
+
+
+
       
     def forward(self, input1, input2):
         # input1 is a tensor of shape (batch_size, embedding_len, seq_len)
@@ -136,7 +152,7 @@ class PredNet(nn.Module):
         # Transpose the result to make the shape (batch_size, seq_len, input_dim):
         input = input.transpose(1,2)
 
-        output = self.linear(input)
+        output = self.layers(input)
 
         return output
 

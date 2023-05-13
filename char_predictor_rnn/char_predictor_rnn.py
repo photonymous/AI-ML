@@ -80,7 +80,7 @@ class CharPredictorRNN(nn.Module):
                                       batch_first = True)
         self.linear          = nn.Linear(hidden_dim, vocab_size)
         self.softmax         = nn.LogSoftmax(dim=2)
-
+    
     def forward(self, input_sequence, hidden):
         # Embed the input sequence:
         #  embedded is a tensor of size (batch_size, seq_len, embedding_len).
