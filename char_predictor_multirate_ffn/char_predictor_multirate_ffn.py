@@ -2,7 +2,7 @@
 # it will behave like the CharPredictorRNN (one char in, one char out, with internal 
 # state). Internally, however, it will be structured as follows. There will be 
 # multiple stages. The first stage is a multilayer feedforward neural network that
-# conlvolves along the input data. Its ouptut is updated ever other input sample.
+# conlvolves along the input data. Its ouptut is updated every other input sample.
 # The second stage behaves the same way, taking the output of the first stage as
 # input and updating every other sample, so its update rate is 1/4th of the initial
 # input rate. The third stage behaves the same way, taking the output of the second
@@ -27,14 +27,13 @@ from torch.utils.data import Dataset, DataLoader
 import time
 import datetime
 from torch.optim.lr_scheduler import ExponentialLR
-#import torch.jit
 from typing import List
 from torch import Tensor
 import cProfile
 import pstats
+#import os
 
-
-# 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97
+#os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
 # Specify all global constants that aren't arguments:
 VOCAB_SIZE     = 256
@@ -42,28 +41,24 @@ LEARNING_RATE  = 0.001
 LR_GAMMA       = 1
 WEIGHT_DECAY   = 0.01
 
-# I need a good variable name for the kernel size of the first convolutional layer. I like to think of it
-# in DSP terms, and in DSP you'd call it the "number of taps" or the "FIR length" or the "filter length"
-# or the "support". But in machine learning you call it the "kernel size". I'm going to call it the
-# "FIFO length" because that's what it is. It's the length of the FIFO that the convolutional layer
-# uses to compute its output. It's the number of input samples that the convolutional layer uses to
-# compute its output. 
 
 # Specify defaults for all arguments as ALL_CAPS globals:
 MODE                = "train"
-#                      0	1	  2	    3	      4 	5	  6	    7
-#                      1234567890123456789012345678901234567890123456789012345678901234567890
-SEED_STR            = "there was a young lady named bright who ate "
+#                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
+#                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+#SEED_STR            =    "                                                                                                                                                                                                                                                                "
+SEED_STR            =    "The house to which D'Artagnan and Porthos conducted Athos and Aramis was the one assigned to them by General Cromwell and of which they had taken possession on the previous evening. It was at the corner of two streets and had in the rear, bordering on the "
+#SEED_STR            =  """The house to which D’Artagnan and Porthos conducted Athos and Aramis was the one assigned to them by General Cromwell and of which they had taken possession on the previous evening. It was at the corner of two streets and had in the rear, bordering on the """
 NUM_CHARS           = 500
 EMBEDDING_LEN       = 32
-SEQ_LEN             = 64 
-WARMUP              = 16
-NUM_EPOCHS          = 50
+SEQ_LEN             = 256 
+WARMUP              = 64
+NUM_EPOCHS          = 1000
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-CONVNET_HIDDEN_DIMS = [[128,128],[128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
-PREDNET_HIDDEN_DIMS = [320]
-BATCH_SIZE          = 128
-MAX_CHARS           = 2**21
+CONVNET_HIDDEN_DIMS = [[128,128,128],[128,128,128],[128,128,128],[128,128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
+PREDNET_HIDDEN_DIMS = [1024,512,256]
+BATCH_SIZE          = 256
+MAX_CHARS           = 2**23
 CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.txt"
 MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn.pth"
 
@@ -115,9 +110,6 @@ class PredNet(nn.Module):
         layers.append(nn.Linear(current_in_dim, self.output_dim))
 
         self.layers = nn.Sequential(*layers)
-
-
-
       
     def forward(self, input1, input2):
         # input1 is a tensor of shape (batch_size, embedding_len, seq_len)
@@ -130,10 +122,20 @@ class PredNet(nn.Module):
 
         # TODO: Once we add decimation, we'll need a for loop to build up the input tensor.
         #       We will use repeat_interleave() to upsample the decimated convnet outputs to the same length.
-        #       Once the context length is too long, we will need to chunk it up and iterate over chunks of
+        ## Construct a tuple containing input1[:,:,:seq_len] and all the tensors in input2 indexed at [:,:,:seq_len]:
+        #tuple_of_tensors = (input1[:,:,:seq_len],) + tuple(input2[jj][:,:,:seq_len] for jj in range(len(input2)))
+        
+        # Because each stage decimates, we need to use repeat_interleave() to upsample the stage outputs we put into the tuple_of_tensors.
+        # The upsampling factor is 2**(stage_idx+1), where stage_idx is 0 based
+        tuple_of_tensors = (input1[:,:,:seq_len],)
+        for jj in range(len(input2)):
+            # Upsample the convnet output by the appropriate factor:
+            upsampled = input2[jj].repeat_interleave(2**(jj+1), dim=2)[:,:,:seq_len]
+            # Add it to the tuple:
+            tuple_of_tensors = tuple_of_tensors + (upsampled,)
+
+        # TODO: Once the context length is too long, we will need to chunk it up and iterate over chunks of
         #       sequence elements, so this will need a second for loop.
-        # Construct a tuple containing input1[:,:,:seq_len] and all the tensors in input2 indexed at [:,:,:seq_len]:
-        tuple_of_tensors = (input1[:,:,:seq_len],) + tuple(input2[jj][:,:,:seq_len] for jj in range(len(input2)))
         # Concatenate the tensors in the tuple along the 2nd dimension:
         input = torch.cat(tuple_of_tensors, dim=1)
         # Transpose the result to make the shape (batch_size, seq_len, input_dim):
@@ -159,8 +161,8 @@ class ConvNetStage(nn.Module):
         self.conv_layers = nn.ModuleList()
         self.relu_layers = nn.ModuleList()
 
-        # Create the first layer:
-        self.conv_layers.append(nn.Conv1d(in_channels=input_dim, out_channels=hidden_dims[0], kernel_size=fifo_len, padding=fifo_len-1))
+        # Create the first layer. Only the input layer for each stage decimates by 2 (and always by 2):
+        self.conv_layers.append(nn.Conv1d(in_channels=input_dim, out_channels=hidden_dims[0], kernel_size=fifo_len, padding=fifo_len-1, stride=2))
         self.relu_layers.append(nn.ReLU())
         # Create the rest of the layers:
         for ii in range(1, len(hidden_dims)):
@@ -187,8 +189,6 @@ class MultiStageConvNet(nn.Module):
         #    The second layer in the last stage has 73 output features. Etc.
         # The first layer in each stage will have a kernel size of fifo_len, and
         # the rest of the layers in the stage will have a kernel size of 1.
-        
-        # TODO: Add decimation.        
         
         # Create all the stages. We will use a list to hold the stages:
         self.convnet_hidden_dims = convnet_hidden_dims
@@ -323,6 +323,17 @@ def train_model(model, dataloader, device, num_epochs, warmup):
     model.to(device)
     criterion = nn.NLLLoss()
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    # create the optimizer, but give each stage a different learning rate:
+    # optimizer = optim.AdamW([
+    #     {"params": model.embedding.parameters(), "lr": LEARNING_RATE},
+    #     # now we need to loop over the convnet stages:
+    #     *[
+    #         {"params": stage.parameters(), "lr": LEARNING_RATE/2**idx}
+    #         for idx, stage in enumerate(model.multistage_convnet.stages)
+    #     ],        
+    #     {"params": model.prednet.parameters(), "lr": LEARNING_RATE}
+    # ], weight_decay=WEIGHT_DECAY)
+
     scheduler = ExponentialLR(optimizer, gamma=LR_GAMMA)
     for epoch in range(num_epochs):
         start_time = time.time()
@@ -409,10 +420,13 @@ def generate_text(model, seed_str, num_chars, device, vocab_size):
 
     # Now we can start generating the text:
     generated_text = seed_str + chr(predicted_char)
+    seed_str_len = len(seed_str)
     for i in range(num_chars):
         # We need to feed the model with the new context to get the next
-        # character prediction:
-        context_tensor = torch.tensor(context, dtype=torch.long, device=device)
+        # character prediction. But only feed it with the most recent seed_str length characters:
+        # grab the last seed_str_len characters from the context:
+        last_chars = context[-seed_str_len:]
+        context_tensor = torch.tensor(last_chars, dtype=torch.long, device=device)
         context_tensor = context_tensor.unsqueeze(0)
         outputs = model(context_tensor)
 
@@ -468,8 +482,10 @@ def main():
         # Generate text:
         generated_text = generate_text(model, args.seed_str, args.num_chars, "cuda" if torch.cuda.is_available() else "cpu", VOCAB_SIZE)
 
-        # Print the generated text:
-        print(generated_text)
+        # Print the seed string:
+        print(SEED_STR, ":")
+        # Print the generated text, but omit the seed_str from the beginning:
+        print(generated_text[len(SEED_STR):])
     else:
         print("Invalid mode: " + args.mode)
 
