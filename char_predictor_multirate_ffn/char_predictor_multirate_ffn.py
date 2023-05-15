@@ -39,7 +39,7 @@ import pstats
 VOCAB_SIZE     = 256
 LEARNING_RATE  = 0.001
 LR_GAMMA       = 1
-WEIGHT_DECAY   = 0.01
+WEIGHT_DECAY   = 0.0
 
 
 # Specify defaults for all arguments as ALL_CAPS globals:
@@ -51,14 +51,14 @@ SEED_STR            =    "The house to which D'Artagnan and Porthos conducted At
 #SEED_STR            =  """The house to which D’Artagnan and Porthos conducted Athos and Aramis was the one assigned to them by General Cromwell and of which they had taken possession on the previous evening. It was at the corner of two streets and had in the rear, bordering on the """
 NUM_CHARS           = 500
 EMBEDDING_LEN       = 32
-SEQ_LEN             = 256 
-WARMUP              = 64
-NUM_EPOCHS          = 1000
+SEQ_LEN             = 128 
+WARMUP              = 32
+NUM_EPOCHS          = 100
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-CONVNET_HIDDEN_DIMS = [[128,128,128],[128,128,128],[128,128,128],[128,128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convnet. The number of convnets is the length of this list.
-PREDNET_HIDDEN_DIMS = [1024,512,256]
+CONVNET_HIDDEN_DIMS = [[256,128,128],[128,128]]#[[128,128,128],[128,128,128],[128,128,128],[128,128,128],[128,128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
+PREDNET_HIDDEN_DIMS = [256]#[1024,512,512,256]
 BATCH_SIZE          = 256
-MAX_CHARS           = 2**23
+MAX_CHARS           = 2**21
 CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.txt"
 MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn.pth"
 
@@ -242,6 +242,7 @@ class CharPredictorMultirateFFN(nn.Module):
         # input_sequence is a tensor of shape (batch_size, seq_len)
         # The output of the embedding layer is a tensor of shape (batch_size, seq_len, embedding_len)        
         embedding_out = self.embedding(input_sequence)
+
         # But we want the output to be of shape (batch_size, embedding_len, seq_len) so that it can be fed into the convolutional layer.
         # So, we transpose the tensor: 
         embedding_out = embedding_out.transpose(1,2)
@@ -316,8 +317,25 @@ def create_dataloader(input_sequences, target_sequences, batch_size):
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     return dataloader
 
+def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device): #NEW
+    corpus_at_phase = corpus[epoch:]
+    # First, we need to figure out how many batches we can create:
+    num_batches = len(corpus_at_phase) // (seq_len+1)
+    num_chars_to_drop = len(corpus_at_phase) - (num_batches * (seq_len+1))
+    if num_chars_to_drop > 0:
+        corpus_at_phase = corpus_at_phase[:-num_chars_to_drop]
+    corpus_at_phase_tensor = torch.tensor(list(corpus_at_phase), dtype=torch.long)
+    corpus_at_phase_tensor = corpus_at_phase_tensor.view(num_batches, seq_len+1)
+    input_data  = corpus_at_phase_tensor[:, :-1]
+    target_data = corpus_at_phase_tensor[:, 1:]
+    dataset    = CorpusDataset(input_data, target_data)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    
+    return dataloader
+
 # Train the model:
-def train_model(model, dataloader, device, num_epochs, warmup):
+#def train_model(model, dataloader, device, num_epochs, warmup):
+def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup): #NEW
     #with torch.autograd.set_detect_anomaly(True):
     model.train()
     model.to(device)
@@ -334,8 +352,20 @@ def train_model(model, dataloader, device, num_epochs, warmup):
     #     {"params": model.prednet.parameters(), "lr": LEARNING_RATE}
     # ], weight_decay=WEIGHT_DECAY)
 
+    
+
+
     scheduler = ExponentialLR(optimizer, gamma=LR_GAMMA)
     for epoch in range(num_epochs):
+        # TODO: Because each stage decimates, the top stage ends up seeing a small number of identical examples
+        # epoch after epoch. But we can use a data augmentation strategy to mitigate this. Since the corupus is
+        # reshaped to create the input sequences, we can start the process at a different character for each
+        # epoch. This way each epoch's training set has a different "data phase". But this means we need to 
+        # create a new dataloader for each epoch. We can do this by creating a function that returns a dataloader
+        # for a given epoch index, where the epoch index is used to determine the starting character for the
+        # input sequences. It's function signature should be: 
+        dataloader = create_phased_dataloader(epoch, corpus, batch_size, seq_len, device) #NEW
+
         start_time = time.time()
         epoch_loss = 0.0
         for batch_idx, (input_sequences, target_sequences) in enumerate(dataloader):
@@ -453,10 +483,10 @@ def main():
         corpus = read_corpus(args.corpus_file, args.max_chars)
 
         # Prepare the input and target sequences:
-        input_sequences, target_sequences = prepare_sequences(corpus, args.seq_len)
+        #input_sequences, target_sequences = prepare_sequences(corpus, args.seq_len)
 
         # Create a dataloader for the input and target sequences:
-        dataloader = create_dataloader(input_sequences, target_sequences, args.batch_size)
+        #dataloader = create_dataloader(input_sequences, target_sequences, args.batch_size)
 
         # Create the model:   
         model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
@@ -468,7 +498,8 @@ def main():
             print(f"{name} {param.numel()}", flush=True)
         
         # Train the model:
-        train_model(model, dataloader, "cuda" if torch.cuda.is_available() else "cpu", args.num_epochs, args.warmup)
+        #train_model(model, dataloader, "cuda" if torch.cuda.is_available() else "cpu", args.num_epochs, args.warmup)
+        train_model(model, corpus, args.batch_size, args.seq_len, "cuda" if torch.cuda.is_available() else "cpu", args.num_epochs, args.warmup) #NEW
 
         # Save the model:
         save_model(model, args.model_file)
