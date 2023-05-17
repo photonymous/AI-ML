@@ -15,6 +15,15 @@
 # input sample. The prediction network is trained to predict the next character
 # in the sequence. The loss function is the cross entropy loss function. 
 
+# Use the following bash command to get seed strings of a specific length. In this 
+# case, 512 characters. You can modify the "skip" parameter to jump through the
+# file in increments of this many characters:
+#       tr -d '\n\r' < wiki.valid.raw | dd bs=512 skip=11 count=1 2>/dev/null | wc
+
+# Training data:
+#  Children's book corpus: https://huggingface.co/roneneldan/
+#  Standardized Gutenberg corpus: https://github.com/pgcorpus/gutenberg
+
 # Import the libraries we will need:
 import torch
 import torch.nn as nn
@@ -47,19 +56,23 @@ MODE                = "train"
 #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
 #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
 #SEED_STR            =    "                                                                                                                                                                                                                                                                "
-SEED_STR            =    "The house to which D'Artagnan and Porthos conducted Athos and Aramis was the one assigned to them by General Cromwell and of which they had taken possession on the previous evening. It was at the corner of two streets and had in the rear, bordering on the "
+#SEED_STR            =    "The house to which D'Artagnan and Porthos conducted Athos and Aramis was the one assigned to them by General Cromwell and of which they had taken possession on the previous evening. It was at the corner of two streets and had in the rear, bordering on the "
+#SEED_STR            =    "Its strategic position at the railroad junction led to the Confederate construction of several military installations to support the war . During the Battle of Meridian in 1864 , General William Tecumseh Sherman led troops into the city , destroying the ra"
 #SEED_STR            =  """The house to which D’Artagnan and Porthos conducted Athos and Aramis was the one assigned to them by General Cromwell and of which they had taken possession on the previous evening. It was at the corner of two streets and had in the rear, bordering on the """
-NUM_CHARS           = 500
-EMBEDDING_LEN       = 32
-SEQ_LEN             = 128 
-WARMUP              = 32
-NUM_EPOCHS          = 100
+#SEED_STR            = "ychaete worms .  The three clawed lobster species Homarus gammarus , H. americanus and Nephrops norvegicus are hosts to the three known species of the animal phylum Cycliophora ; the species on H. gammarus has not been described .  Homarus gammarus is susceptible to the disease gaffkaemia , caused by the bacterium Aerococcus viridans . Although it is frequently found in American lobsters , the disease has only been seen in captive H. gammarus , where prior occupation of the tanks by H. americanus could not"
+SEED_STR            =  "Once upon a time, there was a little boy named Tim. Tim had a big, orange ball. He loved his ball very much. One day, Tim met a girl named Sue. Sue had a pretty doll. Tim liked Sues doll, and Sue liked Tims orange ball. Tim and Sue thought about a trade. They would trade the ball for the doll. Tim was not sure. He loved his orange ball. Sue said, I promise to take care of your ball. You can play with it when you want. Tim said, I promise to take care of your doll too. They did the trade. Tim played with th"
+NUM_CHARS           = 2000
+EMBEDDING_LEN       = 64
+SEQ_LEN             = 2048 
+WARMUP              = 0
+NUM_EPOCHS          = 10
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-CONVNET_HIDDEN_DIMS = [[256,128,128],[128,128]]#[[128,128,128],[128,128,128],[128,128,128],[128,128,128],[128,128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
-PREDNET_HIDDEN_DIMS = [256]#[1024,512,512,256]
-BATCH_SIZE          = 256
-MAX_CHARS           = 2**21
-CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.txt"
+CONVNET_HIDDEN_DIMS = [[512,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
+PREDNET_HIDDEN_DIMS = [2048,1024,1024,512,256]
+BATCH_SIZE          = 64
+MAX_CHARS           = 1959000000 #2**30
+#CORPUS_FILE         = "/data/training_data/wiki.train.raw" #"/data/training_data/gutenberg_corpus_21MB.txt"
+CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
 MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
@@ -120,17 +133,16 @@ class PredNet(nn.Module):
 
         seq_len = input1.shape[2]
 
-        # TODO: Once we add decimation, we'll need a for loop to build up the input tensor.
-        #       We will use repeat_interleave() to upsample the decimated convnet outputs to the same length.
-        ## Construct a tuple containing input1[:,:,:seq_len] and all the tensors in input2 indexed at [:,:,:seq_len]:
         #tuple_of_tensors = (input1[:,:,:seq_len],) + tuple(input2[jj][:,:,:seq_len] for jj in range(len(input2)))
-        
-        # Because each stage decimates, we need to use repeat_interleave() to upsample the stage outputs we put into the tuple_of_tensors.
-        # The upsampling factor is 2**(stage_idx+1), where stage_idx is 0 based
+    
+        # # OLD: Because each stage decimates, we need to use repeat_interleave() to upsample the stage outputs we put into the tuple_of_tensors.
+        # # OLD: The upsampling factor is 2**(stage_idx+1), where stage_idx is 0 based
+        # Each stage (except the first stage) decimates by 2:
         tuple_of_tensors = (input1[:,:,:seq_len],)
         for jj in range(len(input2)):
             # Upsample the convnet output by the appropriate factor:
-            upsampled = input2[jj].repeat_interleave(2**(jj+1), dim=2)[:,:,:seq_len]
+#            upsampled = input2[jj].repeat_interleave(2**(jj+1), dim=2)[:,:,:seq_len]
+            upsampled = input2[jj].repeat_interleave(2**jj, dim=2)[:,:,:seq_len]
             # Add it to the tuple:
             tuple_of_tensors = tuple_of_tensors + (upsampled,)
 
@@ -149,20 +161,21 @@ class PredNet(nn.Module):
 # It would be more elegant if we had a ConvNetStage class, and a MultiStageConvNet class that
 # contained a list of ConvNetStage objects. Lets define the ConvNetStage class first.
 class ConvNetStage(nn.Module):
-    def __init__(self, input_dim, fifo_len, hidden_dims):
+    def __init__(self, input_dim, fifo_len, hidden_dims, dec_by):
         super(ConvNetStage, self).__init__()
         
         # define the members:
         self.input_dim   = input_dim
         self.fifo_len    = fifo_len
         self.hidden_dims = hidden_dims
+        self.dec_by      = dec_by
 
         # define the layers:
         self.conv_layers = nn.ModuleList()
         self.relu_layers = nn.ModuleList()
 
-        # Create the first layer. Only the input layer for each stage decimates by 2 (and always by 2):
-        self.conv_layers.append(nn.Conv1d(in_channels=input_dim, out_channels=hidden_dims[0], kernel_size=fifo_len, padding=fifo_len-1, stride=2))
+        # Create the first layer. Only the input layer for each stage decimates (if it decimates at all):
+        self.conv_layers.append(nn.Conv1d(in_channels=input_dim, out_channels=hidden_dims[0], kernel_size=fifo_len, padding=fifo_len-1, stride=dec_by))
         self.relu_layers.append(nn.ReLU())
         # Create the rest of the layers:
         for ii in range(1, len(hidden_dims)):
@@ -197,10 +210,11 @@ class MultiStageConvNet(nn.Module):
             # The input dimension to the first stage is the embedding length:
             if ii == 0:
                 input_dim = embedding_len
+                self.stages.append(ConvNetStage(input_dim, fifo_len, convnet_hidden_dims[ii], dec_by=1))
             else:
                 input_dim = convnet_hidden_dims[ii-1][-1]
-            # Create the stage:
-            self.stages.append(ConvNetStage(input_dim, fifo_len, convnet_hidden_dims[ii]))
+                self.stages.append(ConvNetStage(input_dim, fifo_len, convnet_hidden_dims[ii], dec_by=2))
+
         
         
     def forward(self, x):
@@ -265,38 +279,38 @@ def read_corpus(file_path, max_chars=None):
         corpus = f.read(max_chars)
     return corpus
 
-# Prepare the input and target sequences. Remember,
-# the input data is unsigned 8-bit values. Every character in the
-# input sequence will have a corresponding target character.
-def prepare_sequences(corpus, seq_len):
-    # Now we need to create the input sequences. Each input sequence is just a little piece of the corpus.
-    # If our sequence length is 5, then we actually need to grab 6 characters from the corpus, because
-    # the first 5 characters will be the input sequence, and then the 2nd through the 6th characters will
-    # be the target sequence. We will use the first 5 characters to predict the 2nd through the 6th characters.
-    # So you'll see "seq_len + 1" in the code below prior to pruning down to seq_len.
+# # Prepare the input and target sequences. Remember,
+# # the input data is unsigned 8-bit values. Every character in the
+# # input sequence will have a corresponding target character.
+# def prepare_sequences(corpus, seq_len):
+#     # Now we need to create the input sequences. Each input sequence is just a little piece of the corpus.
+#     # If our sequence length is 5, then we actually need to grab 6 characters from the corpus, because
+#     # the first 5 characters will be the input sequence, and then the 2nd through the 6th characters will
+#     # be the target sequence. We will use the first 5 characters to predict the 2nd through the 6th characters.
+#     # So you'll see "seq_len + 1" in the code below prior to pruning down to seq_len.
 
-    corpus_tensor = torch.tensor(list(corpus), dtype=torch.long)
+#     corpus_tensor = torch.tensor(list(corpus), dtype=torch.long)
     
-    # First, we need to figure out how many batches we can create:
-    num_batches = len(corpus_tensor) // (seq_len+1)
+#     # First, we need to figure out how many batches we can create:
+#     num_batches = len(corpus_tensor) // (seq_len+1)
 
-    # Now we need to figure out how many characters we need to drop from the end of the corpus tensor
-    # so that we can create an input sequence of length seq_len:
-    num_chars_to_drop = len(corpus_tensor) - (num_batches * (seq_len+1))
+#     # Now we need to figure out how many characters we need to drop from the end of the corpus tensor
+#     # so that we can create an input sequence of length seq_len:
+#     num_chars_to_drop = len(corpus_tensor) - (num_batches * (seq_len+1))
 
-    # Now we need to drop those characters from the end of the corpus tensor:
-    if num_chars_to_drop > 0:
-        corpus_tensor = corpus_tensor[:-num_chars_to_drop]
+#     # Now we need to drop those characters from the end of the corpus tensor:
+#     if num_chars_to_drop > 0:
+#         corpus_tensor = corpus_tensor[:-num_chars_to_drop]
 
-    # Now we need to reshape the corpus tensor into a tensor of size (num_batches, seq_len),
-    # and we'll use view() so that we don't have to copy the data:
-    corpus_tensor = corpus_tensor.view(num_batches, seq_len+1)
+#     # Now we need to reshape the corpus tensor into a tensor of size (num_batches, seq_len),
+#     # and we'll use view() so that we don't have to copy the data:
+#     corpus_tensor = corpus_tensor.view(num_batches, seq_len+1)
 
-    # Finally, form the input and target sequences, and make them seq_len long:
-    input_data  = corpus_tensor[:, :-1]
-    target_data = corpus_tensor[:, 1:]
+#     # Finally, form the input and target sequences, and make them seq_len long:
+#     input_data  = corpus_tensor[:, :-1]
+#     target_data = corpus_tensor[:, 1:]
 
-    return input_data, target_data
+#     return input_data, target_data
 
 # Create the dataset:
 class CorpusDataset(Dataset):
@@ -310,14 +324,14 @@ class CorpusDataset(Dataset):
     def __getitem__(self, idx):
         return self.input_sequences[idx], self.target_sequences[idx]
 
-# Create the dataloader. How does the batch_size relate to the seq_len?
-#  The batch_size is the number of input sequences that will be fed to the model per batch.
-def create_dataloader(input_sequences, target_sequences, batch_size):
-    dataset    = CorpusDataset(input_sequences, target_sequences)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    return dataloader
+# # Create the dataloader. How does the batch_size relate to the seq_len?
+# #  The batch_size is the number of input sequences that will be fed to the model per batch.
+# def create_dataloader(input_sequences, target_sequences, batch_size):
+#     dataset    = CorpusDataset(input_sequences, target_sequences)
+#     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+#     return dataloader
 
-def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device): #NEW
+def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device):
     corpus_at_phase = corpus[epoch:]
     # First, we need to figure out how many batches we can create:
     num_batches = len(corpus_at_phase) // (seq_len+1)
@@ -335,36 +349,23 @@ def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device): #NEW
 
 # Train the model:
 #def train_model(model, dataloader, device, num_epochs, warmup):
-def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup): #NEW
+def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup):
     #with torch.autograd.set_detect_anomaly(True):
     model.train()
     model.to(device)
     criterion = nn.NLLLoss()
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-    # create the optimizer, but give each stage a different learning rate:
-    # optimizer = optim.AdamW([
-    #     {"params": model.embedding.parameters(), "lr": LEARNING_RATE},
-    #     # now we need to loop over the convnet stages:
-    #     *[
-    #         {"params": stage.parameters(), "lr": LEARNING_RATE/2**idx}
-    #         for idx, stage in enumerate(model.multistage_convnet.stages)
-    #     ],        
-    #     {"params": model.prednet.parameters(), "lr": LEARNING_RATE}
-    # ], weight_decay=WEIGHT_DECAY)
-
-    
-
 
     scheduler = ExponentialLR(optimizer, gamma=LR_GAMMA)
     for epoch in range(num_epochs):
-        # TODO: Because each stage decimates, the top stage ends up seeing a small number of identical examples
+        # Because each stage decimates, the top stage ends up seeing a small number of identical examples
         # epoch after epoch. But we can use a data augmentation strategy to mitigate this. Since the corupus is
         # reshaped to create the input sequences, we can start the process at a different character for each
         # epoch. This way each epoch's training set has a different "data phase". But this means we need to 
         # create a new dataloader for each epoch. We can do this by creating a function that returns a dataloader
         # for a given epoch index, where the epoch index is used to determine the starting character for the
-        # input sequences. It's function signature should be: 
-        dataloader = create_phased_dataloader(epoch, corpus, batch_size, seq_len, device) #NEW
+        # input sequences:
+        dataloader = create_phased_dataloader(epoch, corpus, batch_size, seq_len, device) 
 
         start_time = time.time()
         epoch_loss = 0.0
