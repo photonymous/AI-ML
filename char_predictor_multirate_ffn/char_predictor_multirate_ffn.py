@@ -51,36 +51,51 @@ LR_GAMMA       = 1
 WEIGHT_DECAY   = 0.0
 
 
-# Specify defaults for all arguments as ALL_CAPS globals:
-MODE                = "train"
+# # ==================================================================================================
+# # Version 1.0 of a medium-sized (13M parameters) trained model. Produces loss of 0.49.
+# # Exhibits good gramatical structure, but doesn't seem to know much about the meaning of words, and
+# # doesn't seem to be using the context very well. The subject changes continuously.
+# MODE                = "generate"
+# #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
+# #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+# SEED_STR            = """John got a new blue ball. He showed it to all his neighbors. He showed it to Lucy, who really liked it. Then he showed it to Ben. Ben did not like the ball becuase he doesn't like the color. They got into an argument about the colo"""
+# EMBEDDING_LEN       = 64
+# SEQ_LEN             = 2048 
+# WARMUP              = 0
+# NUM_EPOCHS          = 10
+# FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
+# CONVNET_HIDDEN_DIMS = [[512,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
+# PREDNET_HIDDEN_DIMS = [2048,1024,1024,512,256]
+# BATCH_SIZE          = 64
+# MAX_CHARS           = 1959000000 #2**30
+# #CORPUS_FILE         = "/data/training_data/wiki.train.raw" #"/data/training_data/gutenberg_corpus_21MB.txt"
+# CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
+# MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn_v1.pth"
+
+# ==================================================================================================
+# Simplified model for exploring model parameters
+MODE                = "generate"
 #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
 #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
-#SEED_STR            =    "                                                                                                                                                                                                                                                                "
-#SEED_STR            =    "The house to which D'Artagnan and Porthos conducted Athos and Aramis was the one assigned to them by General Cromwell and of which they had taken possession on the previous evening. It was at the corner of two streets and had in the rear, bordering on the "
-#SEED_STR            =    "Its strategic position at the railroad junction led to the Confederate construction of several military installations to support the war . During the Battle of Meridian in 1864 , General William Tecumseh Sherman led troops into the city , destroying the ra"
-#SEED_STR            =  """The house to which D’Artagnan and Porthos conducted Athos and Aramis was the one assigned to them by General Cromwell and of which they had taken possession on the previous evening. It was at the corner of two streets and had in the rear, bordering on the """
-#SEED_STR            = "ychaete worms .  The three clawed lobster species Homarus gammarus , H. americanus and Nephrops norvegicus are hosts to the three known species of the animal phylum Cycliophora ; the species on H. gammarus has not been described .  Homarus gammarus is susceptible to the disease gaffkaemia , caused by the bacterium Aerococcus viridans . Although it is frequently found in American lobsters , the disease has only been seen in captive H. gammarus , where prior occupation of the tanks by H. americanus could not"
-SEED_STR            =  "Once upon a time, there was a little boy named Tim. Tim had a big, orange ball. He loved his ball very much. One day, Tim met a girl named Sue. Sue had a pretty doll. Tim liked Sues doll, and Sue liked Tims orange ball. Tim and Sue thought about a trade. They would trade the ball for the doll. Tim was not sure. He loved his orange ball. Sue said, I promise to take care of your ball. You can play with it when you want. Tim said, I promise to take care of your doll too. They did the trade. Tim played with th"
-NUM_CHARS           = 2000
-EMBEDDING_LEN       = 64
-SEQ_LEN             = 2048 
+SEED_STR            = """John got a new blue bal"""
+EMBEDDING_LEN       = 32
+SEQ_LEN             = 64 
 WARMUP              = 0
 NUM_EPOCHS          = 10
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-CONVNET_HIDDEN_DIMS = [[512,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
-PREDNET_HIDDEN_DIMS = [2048,1024,1024,512,256]
-BATCH_SIZE          = 64
-MAX_CHARS           = 1959000000 #2**30
+CONVNET_HIDDEN_DIMS = [[256,128],[128,128],[128,128],[128,128],[128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
+PREDNET_HIDDEN_DIMS = [1024,512,256]
+BATCH_SIZE          = 1024
+MAX_CHARS           = 2**24 #2**30
 #CORPUS_FILE         = "/data/training_data/wiki.train.raw" #"/data/training_data/gutenberg_corpus_21MB.txt"
 CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
-MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn.pth"
+MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn_v1.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
 parser = argparse.ArgumentParser(description='Train or generate text using a character predicting RNN.')
 parser.add_argument('--mode',                type=str, default=MODE, help='The mode: train or generate (default: %(default)s)')
 parser.add_argument('--seed_str',            type=str, default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
-parser.add_argument('--num_chars',           type=int, default=NUM_CHARS, help='The number of characters to generate (default: %(default)s)')
 parser.add_argument('--embedding_len',       type=int, default=EMBEDDING_LEN, help='The embedding length (default: %(default)s)')
 parser.add_argument('--seq_len',             type=int, default=SEQ_LEN, help='The sequence length (default: %(default)s)')
 parser.add_argument('--warmup',              type=int, default=WARMUP, help='The warmup (default: %(default)s)')
@@ -425,54 +440,97 @@ def load_model(model, file_path, device):
 #   Note that the length of the seed_str acts as the "warmup". The model will first
 #   be fed with the seed_str, one character at a time, as warmup. Then the model
 #   will be fed with its own output, one character at a time to generate the text.
-def generate_text(model, seed_str, num_chars, device, vocab_size):
+def generate_text(model, seed_str, seq_len, device, vocab_size):
     
-    # TODO: Make this more efficient. Right now, it just adds the most recent predicted
-    #  character to the generated text, and then feeds the whole generated text to the 
-    #  model to get the next character.
-    #  So its input gets longer and longer as it runs, and it can't reuse its previous
-    #  computations.
+    # TODO: Implement a forward-only version of the model that doesn't use
+    #       convolution. It should use actual fifos, and should pull its
+    #       weights from the trained model.
 
     model.eval()
     model.to(device)
-    context = [ord(c) for c in seed_str]
-    
-    # First, we need to feed the model with the seed_str to get the character that it predicts
-    # following seed_str. It is a convolutional model, so we can just feed it the whole seed_str.
+
+    # NEW:
+    # Create a context string filled with spaces that is seq_len long:
+    context = [ord(' ')] * seq_len
+
+    # Copy the seed_str into the front of the context string:
+    for i, c in enumerate(seed_str):
+        context[i] = ord(c)
+
     context_tensor = torch.tensor(context, dtype=torch.long, device=device)
     context_tensor = context_tensor.unsqueeze(0)
     outputs = model(context_tensor)
     
-    # Outputs is the next-character prediction for each character in the seed_str.
-    # We need to get the last prediction, which is the prediction for the last character
-    # in the seed_str:
-    predicted_char = outputs[0, -1, :].argmax().item()
-    context.append(predicted_char)
+    # Outputs is the next-character prediction for each character in the context.
+    # However, only one of these is valid, the one directly after the last character
+    # in the seed_str. So we need to find that one and use it as the first character
+    predicted_char_idx = len(seed_str)-1
+    predicted_char = outputs[0, predicted_char_idx, :].argmax().item()
+    
+    # Now we need to replace the corresponding character in the context with the
+    # predicted character:
+    context[predicted_char_idx+1] = predicted_char
+    predicted_char_idx += 1    
 
-    # Now we can start generating the text:
-    generated_text = seed_str + chr(predicted_char)
-    seed_str_len = len(seed_str)
-    for i in range(num_chars):
-        # We need to feed the model with the new context to get the next
-        # character prediction. But only feed it with the most recent seed_str length characters:
-        # grab the last seed_str_len characters from the context:
-        last_chars = context[-seed_str_len:]
-        context_tensor = torch.tensor(last_chars, dtype=torch.long, device=device)
+    # Now we can start generating the text. We'll do this by filling the rest of the context    
+    while predicted_char_idx < seq_len-1:
+        context_tensor = torch.tensor(context, dtype=torch.long, device=device)
         context_tensor = context_tensor.unsqueeze(0)
-        outputs = model(context_tensor)
+        outputs = model(context_tensor)        
 
         # Generate the next character prediction by sampling from the output distribution.
         # We should be using np.random.choice for this, and the outputs have already been softmaxed:
-        probs = torch.exp(outputs[0,-1,:]).cpu().data.numpy().flatten()
+        probs = torch.exp(outputs[0,predicted_char_idx,:]).cpu().data.numpy().flatten()
         predicted_char = np.random.choice(vocab_size, p=probs)
         
-        context.append(predicted_char)
+        context[predicted_char_idx+1] = predicted_char
+        predicted_char_idx += 1
 
-        print(i, flush=True, end=" ")
+        print(predicted_char_idx, flush=True, end=" ")
+    print("\n")   
+    generated_text = "".join([chr(c) for c in context])
 
-        # Append the predicted character to the generated text:
-        generated_text += chr(predicted_char)
-    print("\n")
+
+    # # OLD:    
+    # context = [ord(c) for c in seed_str]
+    
+    # # First, we need to feed the model with the seed_str to get the character that it predicts
+    # # following seed_str. It is a convolutional model, so we can just feed it the whole seed_str.
+    # context_tensor = torch.tensor(context, dtype=torch.long, device=device)
+    # context_tensor = context_tensor.unsqueeze(0)
+    # outputs = model(context_tensor)
+    
+    # # Outputs is the next-character prediction for each character in the seed_str.
+    # # We need to get the last prediction, which is the prediction for the last character
+    # # in the seed_str:
+    # predicted_char = outputs[0, -1, :].argmax().item()
+    # context.append(predicted_char)
+
+    # # Now we can start generating the text:
+    # generated_text = seed_str + chr(predicted_char)
+    # seed_str_len = len(seed_str)
+    # for i in range(seq_len):
+    #     # We need to feed the model with the new context to get the next
+    #     # character prediction. But only feed it with the most recent seed_str length characters:
+    #     # grab the last seed_str_len characters from the context:
+    #     last_chars = context[-seed_str_len:]
+    #     context_tensor = torch.tensor(last_chars, dtype=torch.long, device=device)
+    #     context_tensor = context_tensor.unsqueeze(0)
+    #     outputs = model(context_tensor)
+
+    #     # Generate the next character prediction by sampling from the output distribution.
+    #     # We should be using np.random.choice for this, and the outputs have already been softmaxed:
+    #     probs = torch.exp(outputs[0,-1,:]).cpu().data.numpy().flatten()
+    #     predicted_char = np.random.choice(vocab_size, p=probs)
+        
+    #     context.append(predicted_char)
+
+    #     print(i, flush=True, end=" ")
+
+    #     # Append the predicted character to the generated text:
+    #     generated_text += chr(predicted_char)
+    # print("\n")
+    
 
     return generated_text
 
@@ -512,7 +570,7 @@ def main():
         load_model(model, args.model_file, "cuda" if torch.cuda.is_available() else "cpu")
 
         # Generate text:
-        generated_text = generate_text(model, args.seed_str, args.num_chars, "cuda" if torch.cuda.is_available() else "cpu", VOCAB_SIZE)
+        generated_text = generate_text(model, args.seed_str, args.seq_len, "cuda" if torch.cuda.is_available() else "cpu", VOCAB_SIZE)
 
         # Print the seed string:
         print(SEED_STR, ":")
@@ -527,9 +585,5 @@ if __name__ == "__main__":
     main()
 
     #pr.print_stats(sort="time")
-
-
-
-
 
 
