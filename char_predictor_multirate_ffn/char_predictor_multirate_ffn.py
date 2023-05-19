@@ -47,7 +47,7 @@ import pstats
 # Specify all global constants that aren't arguments:
 VOCAB_SIZE     = 256
 LEARNING_RATE  = 0.001
-LR_GAMMA       = 1
+LR_GAMMA       = 0.9
 WEIGHT_DECAY   = 0.0
 
 
@@ -74,22 +74,22 @@ WEIGHT_DECAY   = 0.0
 
 # ==================================================================================================
 # Simplified model for exploring model parameters
-MODE                = "generate"
+MODE                = "train"
 #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
 #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
-SEED_STR            = """John got a new blue bal"""
-EMBEDDING_LEN       = 32
-SEQ_LEN             = 64 
+SEED_STR            = """John got"""
+EMBEDDING_LEN       = 64
+SEQ_LEN             = 4096 
 WARMUP              = 0
-NUM_EPOCHS          = 10
+NUM_EPOCHS          = 5
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-CONVNET_HIDDEN_DIMS = [[256,128],[128,128],[128,128],[128,128],[128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
-PREDNET_HIDDEN_DIMS = [1024,512,256]
-BATCH_SIZE          = 1024
-MAX_CHARS           = 2**24 #2**30
+CONVNET_HIDDEN_DIMS = [[512,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
+PREDNET_HIDDEN_DIMS = [4096,2048,1024,512,256]
+BATCH_SIZE          = 8
+MAX_CHARS           = 1959000000 #2**26 #2**30
 #CORPUS_FILE         = "/data/training_data/wiki.train.raw" #"/data/training_data/gutenberg_corpus_21MB.txt"
 CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
-MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn_v1.pth"
+MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn_v2.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
@@ -133,7 +133,8 @@ class PredNet(nn.Module):
         current_in_dim = self.input_dim
         for i in range(len(self.hidden_dims)):
             layers.append(nn.Linear(current_in_dim, self.hidden_dims[i]))
-            layers.append(nn.ReLU())
+            layers.append(nn.LayerNorm(self.hidden_dims[i]))
+            layers.append(nn.PReLU())
             current_in_dim = self.hidden_dims[i]
         layers.append(nn.Linear(current_in_dim, self.output_dim))
 
@@ -173,6 +174,24 @@ class PredNet(nn.Module):
         return output
 
 
+
+class TimeStepNorm(nn.Module):
+    def __init__(self, num_features, eps=1e-5):
+        super(TimeStepNorm, self).__init__()
+        self.gamma = nn.Parameter(torch.ones(1, num_features, 1))  # Scale
+        self.beta = nn.Parameter(torch.zeros(1, num_features, 1))  # Shift
+        self.eps = eps
+
+    def forward(self, x):
+        mean = x.mean(dim=1, keepdim=True)
+        std = x.std(dim=1, keepdim=True, unbiased=False)
+        x = (x - mean) / (std + self.eps)
+        return self.gamma * x + self.beta
+
+
+
+
+
 # It would be more elegant if we had a ConvNetStage class, and a MultiStageConvNet class that
 # contained a list of ConvNetStage objects. Lets define the ConvNetStage class first.
 class ConvNetStage(nn.Module):
@@ -185,26 +204,48 @@ class ConvNetStage(nn.Module):
         self.hidden_dims = hidden_dims
         self.dec_by      = dec_by
 
-        # define the layers:
-        self.conv_layers = nn.ModuleList()
-        self.relu_layers = nn.ModuleList()
+        layers = []
 
-        # Create the first layer. Only the input layer for each stage decimates (if it decimates at all):
-        self.conv_layers.append(nn.Conv1d(in_channels=input_dim, out_channels=hidden_dims[0], kernel_size=fifo_len, padding=fifo_len-1, stride=dec_by))
-        self.relu_layers.append(nn.ReLU())
-        # Create the rest of the layers:
+        layers.append(nn.Conv1d(in_channels=input_dim, out_channels=hidden_dims[0], kernel_size=fifo_len, padding=fifo_len-1, stride=dec_by))
+        #layers.append(TimeStepNorm(hidden_dims[0]))
+        layers.append(nn.PReLU())
         for ii in range(1, len(hidden_dims)):
-            self.conv_layers.append(nn.Conv1d(in_channels=hidden_dims[ii-1], out_channels=hidden_dims[ii], kernel_size=1))
-            self.relu_layers.append(nn.ReLU())
+            layers.append(nn.Conv1d(in_channels=hidden_dims[ii-1], out_channels=hidden_dims[ii], kernel_size=1))
+            if ii == len(hidden_dims)-1:
+                layers.append(TimeStepNorm(hidden_dims[ii]))
+            layers.append(nn.PReLU())
+        
+        self.layers = nn.Sequential(*layers)
 
     def forward(self, input):
         # input is a tensor of shape (batch_size, input_dim, seq_len)
-        # output is a tensor of shape (batch_size, hidden_dims[-1], seq_len + padding)
-        output = input
-        for ii in range(len(self.conv_layers)):
-            output = self.conv_layers[ii](output)
-            output = self.relu_layers[ii](output)
+        # output is a tensor of shape (batch_size, hidden_dims[-1], seq_len//dec_by)
+
+        output = self.layers(input)
+
         return output
+
+
+    #     # define the layers:
+    #     self.conv_layers = nn.ModuleList()
+    #     self.relu_layers = nn.ModuleList()
+
+    #     # Create the first layer. Only the input layer for each stage decimates (if it decimates at all):
+    #     self.conv_layers.append(nn.Conv1d(in_channels=input_dim, out_channels=hidden_dims[0], kernel_size=fifo_len, padding=fifo_len-1, stride=dec_by))
+    #     self.relu_layers.append(nn.ReLU())
+    #     # Create the rest of the layers:
+    #     for ii in range(1, len(hidden_dims)):
+    #         self.conv_layers.append(nn.Conv1d(in_channels=hidden_dims[ii-1], out_channels=hidden_dims[ii], kernel_size=1))
+    #         self.relu_layers.append(nn.ReLU())
+
+    # def forward(self, input):
+    #     # input is a tensor of shape (batch_size, input_dim, seq_len)
+    #     # output is a tensor of shape (batch_size, hidden_dims[-1], seq_len + padding)
+    #     output = input
+    #     for ii in range(len(self.conv_layers)):
+    #         output = self.conv_layers[ii](output)
+    #         output = self.relu_layers[ii](output)
+    #     return output
 
 
 # Define the multistage convolutional network class.
@@ -362,10 +403,20 @@ def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device):
     
     return dataloader
 
+
+def init_weights(m):
+    if isinstance(m, nn.Conv1d):
+        nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+
+
+
 # Train the model:
 #def train_model(model, dataloader, device, num_epochs, warmup):
 def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup):
     #with torch.autograd.set_detect_anomaly(True):
+    model.apply(init_weights)
     model.train()
     model.to(device)
     criterion = nn.NLLLoss()
@@ -486,7 +537,8 @@ def generate_text(model, seed_str, seq_len, device, vocab_size):
         context[predicted_char_idx+1] = predicted_char
         predicted_char_idx += 1
 
-        print(predicted_char_idx, flush=True, end=" ")
+        # print the progress, overwritng the previous output:
+        print(f"{predicted_char_idx / seq_len * 100:.0f}%", end="\r", flush=True)
     print("\n")   
     generated_text = "".join([chr(c) for c in context])
 
