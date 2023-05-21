@@ -76,6 +76,7 @@ USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 # ==================================================================================================
 # Version 2. New "big" model with 26M parameters. Loss is < 0.42.
+CUDA_DEVICE         = 0
 MODE                = "train"
 #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
 #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
@@ -115,6 +116,7 @@ MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn_v2_9stages
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
 parser = argparse.ArgumentParser(description='Train or generate text using a character predicting RNN.')
+parser.add_argument('--cuda_device',         type=int,   default=CUDA_DEVICE, help='The GPU to run on (0-based) (default: %(default)s)')
 parser.add_argument('--mode',                type=str,   default=MODE, help='The mode: train or generate (default: %(default)s)')
 parser.add_argument('--seed_str',            type=str,   default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
 parser.add_argument('--temperature',         type=float, default=TEMPERATURE, help='The temperature to use for generating text (default: %(default)s)')
@@ -131,6 +133,7 @@ parser.add_argument('--corpus_file',         type=str,   default=CORPUS_FILE, he
 parser.add_argument('--model_file',          type=str,   default=MODEL_FILE, help='The model file (default: %(default)s)')
 args = parser.parse_args()
 
+torch.cuda.set_device(args.cuda_device)
 
 # Define the prediction network class. It will iterate over the sequence, and for each character in the sequence,
 # it will predict the next character in the sequence. It will use the output of the last convolutional layer
