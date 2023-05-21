@@ -115,21 +115,6 @@ MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn_v2_9stages
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
 parser = argparse.ArgumentParser(description='Train or generate text using a character predicting RNN.')
-<<<<<<< HEAD
-parser.add_argument('--mode',                type=str, default=MODE, help='The mode: train or generate (default: %(default)s)')
-parser.add_argument('--seed_str',            type=str, default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
-parser.add_argument('--embedding_len',       type=int, default=EMBEDDING_LEN, help='The embedding length (default: %(default)s)')
-parser.add_argument('--seq_len',             type=int, default=SEQ_LEN, help='The sequence length (default: %(default)s)')
-parser.add_argument('--warmup',              type=int, default=WARMUP, help='The warmup (default: %(default)s)')
-parser.add_argument('--fifo_len',            type=int, default=FIFO_LEN, help='The FIFO length (default: %(default)s)')
-parser.add_argument('--convnet_hidden_dims', type=ast.literal_eval, default=CONVNET_HIDDEN_DIMS, help='The convnet hidden dimensions (default: %(default)s)')
-parser.add_argument('--prednet_hidden_dims', type=ast.literal_eval, default=PREDNET_HIDDEN_DIMS, help='The prediction network hidden dimensions (default: %(default)s)')
-parser.add_argument('--num_epochs',          type=int, default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
-parser.add_argument('--batch_size',          type=int, default=BATCH_SIZE, help='The batch size (default: %(default)s)')
-parser.add_argument('--max_chars',           type=int, default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
-parser.add_argument('--corpus_file',         type=str, default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
-parser.add_argument('--model_file',          type=str, default=MODEL_FILE, help='The model file (default: %(default)s)')
-=======
 parser.add_argument('--mode',                type=str,   default=MODE, help='The mode: train or generate (default: %(default)s)')
 parser.add_argument('--seed_str',            type=str,   default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
 parser.add_argument('--temperature',         type=float, default=TEMPERATURE, help='The temperature to use for generating text (default: %(default)s)')
@@ -144,7 +129,6 @@ parser.add_argument('--batch_size',          type=int,   default=BATCH_SIZE, hel
 parser.add_argument('--max_chars',           type=int,   default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
 parser.add_argument('--corpus_file',         type=str,   default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
 parser.add_argument('--model_file',          type=str,   default=MODEL_FILE, help='The model file (default: %(default)s)')
->>>>>>> 9cc2d263e15cb7ded4c8bccd2a6c1b56b6d02b09
 args = parser.parse_args()
 
 
