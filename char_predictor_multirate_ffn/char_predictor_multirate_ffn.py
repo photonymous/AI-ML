@@ -31,6 +31,7 @@ import torch.nn.functional as F
 import numpy as np
 import sys
 import argparse
+import ast
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import time
@@ -100,8 +101,8 @@ parser.add_argument('--embedding_len',       type=int, default=EMBEDDING_LEN, he
 parser.add_argument('--seq_len',             type=int, default=SEQ_LEN, help='The sequence length (default: %(default)s)')
 parser.add_argument('--warmup',              type=int, default=WARMUP, help='The warmup (default: %(default)s)')
 parser.add_argument('--fifo_len',            type=int, default=FIFO_LEN, help='The FIFO length (default: %(default)s)')
-parser.add_argument('--convnet_hidden_dims', type=int, default=CONVNET_HIDDEN_DIMS, nargs='+', help='The convnet hidden dimensions (default: %(default)s)')
-parser.add_argument('--prednet_hidden_dims', type=int, default=PREDNET_HIDDEN_DIMS, nargs='+', help='The prediction network hidden dimensions (default: %(default)s)')
+parser.add_argument('--convnet_hidden_dims', type=ast.literal_eval, default=CONVNET_HIDDEN_DIMS, help='The convnet hidden dimensions (default: %(default)s)')
+parser.add_argument('--prednet_hidden_dims', type=ast.literal_eval, default=PREDNET_HIDDEN_DIMS, help='The prediction network hidden dimensions (default: %(default)s)')
 parser.add_argument('--num_epochs',          type=int, default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
 parser.add_argument('--batch_size',          type=int, default=BATCH_SIZE, help='The batch size (default: %(default)s)')
 parser.add_argument('--max_chars',           type=int, default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
