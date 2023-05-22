@@ -215,8 +215,6 @@ class TimeStepNorm(nn.Module):
 
 
 
-
-
 # It would be more elegant if we had a ConvNetStage class, and a MultiStageConvNet class that
 # contained a list of ConvNetStage objects. Lets define the ConvNetStage class first.
 class ConvNetStage(nn.Module):
@@ -340,7 +338,6 @@ def read_corpus(file_path, max_chars=None):
     return corpus
 
 
-
 # Create the dataset:
 class CorpusDataset(Dataset):
     def __init__(self, input_sequences, target_sequences):
@@ -354,22 +351,32 @@ class CorpusDataset(Dataset):
         return self.input_sequences[idx], self.target_sequences[idx]
 
 
+class LazyCorpusDataset(Dataset):
+    def __init__(self, corpus, seq_len):
+        self.corpus = corpus
+        self.seq_len = seq_len
+
+    def __len__(self):
+        return len(self.corpus) // (self.seq_len + 1)
+
+    def __getitem__(self, idx):
+        start = idx * (self.seq_len + 1)
+        sample = self.corpus[start : start + self.seq_len + 1]
+        input_data = torch.tensor(list(sample[:-1]), dtype=torch.long)
+        target_data = torch.tensor(list(sample[1:]), dtype=torch.long)
+        return input_data, target_data
+
+
 
 def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device):
+    print("Entering create_phased_dataloader() ...", flush=True)
     corpus_at_phase = corpus[epoch:]
-    # First, we need to figure out how many batches we can create:
-    num_batches = len(corpus_at_phase) // (seq_len+1)
-    num_chars_to_drop = len(corpus_at_phase) - (num_batches * (seq_len+1))
-    if num_chars_to_drop > 0:
-        corpus_at_phase = corpus_at_phase[:-num_chars_to_drop]
-    corpus_at_phase_tensor = torch.tensor(list(corpus_at_phase), dtype=torch.long)
-    corpus_at_phase_tensor = corpus_at_phase_tensor.view(num_batches, seq_len+1)
-    input_data  = corpus_at_phase_tensor[:, :-1]
-    target_data = corpus_at_phase_tensor[:, 1:]
-    dataset    = CorpusDataset(input_data, target_data)
+    dataset = LazyCorpusDataset(corpus_at_phase, seq_len)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    
+
+    print("Exiting create_phased_dataloader()", flush=True)
     return dataloader
+
 
 
 def init_weights(m):
