@@ -369,12 +369,9 @@ class LazyCorpusDataset(Dataset):
 
 
 def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device):
-    print("Entering create_phased_dataloader() ...", flush=True)
     corpus_at_phase = corpus[epoch:]
     dataset = LazyCorpusDataset(corpus_at_phase, seq_len)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-    print("Exiting create_phased_dataloader()", flush=True)
     return dataloader
 
 
