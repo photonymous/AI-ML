@@ -1,0 +1,21 @@
+
+Temple:
+=======
+python3 char_predictor_multirate_ffn.py --mode 'generate' --temperature 0.2 --convnet_hidden_dims '[[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256]]' --prednet_hidden_dims '[2048,2048,1024,512,256]' --model_file ../trained_models/trained_mrffn_temple.pth
+
+
+Fat2 (trained remotely):
+========================
+python3 char_predictor_multirate_ffn.py --mode 'generate' --temperature 0.2 --convnet_hidden_dims '[[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512]]' --prednet_hidden_dims '[2048,2048,1024,512,256]' --model_file ../trained_models/trained_mrffn_fat2.pth
+
+
+Fat (trained locally):
+======================
+python3 char_predictor_multirate_ffn.py --mode 'generate' --temperature 0.2 --convnet_hidden_dims '[[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512],[512,512,512]]' --prednet_hidden_dims '[2048,2048,1024,512,256]' --model_file ../trained_models/trained_mrffn_fat.pth
+
+
+Baseline:
+=========
+python3 char_predictor_multirate_ffn.py --mode 'generate' --temperature 0.2 --convnet_hidden_dims '[[512,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256]]' --model_file ../trained_models/trained_mrffn_10stages.pth
+
+

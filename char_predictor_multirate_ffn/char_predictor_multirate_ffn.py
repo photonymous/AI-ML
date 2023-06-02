@@ -80,7 +80,9 @@ CUDA_DEVICE         = 0
 MODE                = "train"
 #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
 #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
-SEED_STR            = """Once upon a time, there was a little dog named Charlie."""
+#SEED_STR            = """Once upon a time, there was a little dog named Charlie."""
+SEED_STR            = """Story: Timmy loves trains. One day, he and his dad went to the train station. While at the train station, they read books, explored, and ate lunch. After a long time,"
+"""
 TEMPERATURE         = 0.25  # only used for generation. Very low values are very deterministic. 1.0 draws from the exact distribution. Higher values are more random.
 EMBEDDING_LEN       = 64
 SEQ_LEN             = 4096 
@@ -92,7 +94,7 @@ PREDNET_HIDDEN_DIMS = [4096,2048,1024,512,256]
 BATCH_SIZE          = 16
 MAX_CHARS           = 1959000000 #2**26 #2**30
 CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
-MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn_v2_9stages.pth"
+MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_models/trained_mrffn_v2_7stages.pth"
 
 # # ==================================================================================================
 # # Version 3. Experimenting with AMP (for FP16) 
@@ -158,7 +160,7 @@ class PredNet(nn.Module):
         current_in_dim = self.input_dim
         for i in range(len(self.hidden_dims)):
             layers.append(nn.Linear(current_in_dim, self.hidden_dims[i]))
-            layers.append(nn.LayerNorm(self.hidden_dims[i]))
+            layers.append(nn.LayerNorm(self.hidden_dims[i], eps=1e-4)) # eps is used to prevent NaNs in the loss
             layers.append(nn.PReLU())
             current_in_dim = self.hidden_dims[i]
         layers.append(nn.Linear(current_in_dim, self.output_dim))
@@ -387,12 +389,12 @@ def init_weights(m):
 # Train the model:
 #def train_model(model, dataloader, device, num_epochs, warmup):
 def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup):
-    #with torch.autograd.set_detect_anomaly(True):
+    # with torch.autograd.set_detect_anomaly(True):
     model.apply(init_weights)
     model.train()
     model.to(device)
     criterion = nn.NLLLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, eps=1e-4) # eps is used to prevent NaNs in the loss
     scaler    = torch.cuda.amp.GradScaler(enabled=USE_AMP)
 
     start_time = time.time()
