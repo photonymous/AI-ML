@@ -100,14 +100,14 @@ USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 # ==================================================================================================
 # Version 3. Experimenting with AMP (for FP16) 
 CUDA_DEVICE         = 0
-MODE                = "train"
+MODE                = "generate"
 #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
 #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
 SEED_STR            = """John got"""
 TEMPERATURE         = 0.25  # only used for generation. Very low values are very deterministic. 1.0 draws from the exact distribution. Higher values are more random.
 EMBEDDING_LEN       = 32
 SEQ_LEN             = 256 
-NUM_EPOCHS          = 1
+NUM_EPOCHS          = 5
 SHUFFLE             = True
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
 CONVNET_HIDDEN_DIMS = [[256,128],[128,128],[128,128],[128,128],[128,128],[128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
@@ -138,6 +138,8 @@ parser.add_argument('--model_file',          type=str,   default=MODEL_FILE, hel
 args = parser.parse_args()
 
 torch.cuda.set_device(args.cuda_device)
+
+###########################################################################################################################
 
 # Define the prediction network class. It will iterate over the sequence, and for each character in the sequence,
 # it will predict the next character in the sequence. It will use the output of the last convolutional layer
@@ -333,11 +335,7 @@ class CharPredictorMultirateFFN(nn.Module):
         return softmax_out
 
 
-# Preprocess the corpus data as raw 8-bit binary data:
-def read_corpus(file_path, max_chars=None):
-    with open(file_path, "rb") as f:
-        corpus = f.read(max_chars)
-    return corpus
+###########################################################################################################################
 
 
 # Create the dataset:
@@ -369,7 +367,6 @@ class LazyCorpusDataset(Dataset):
         return input_data, target_data
 
 
-
 def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device, shuffle):
     corpus_at_phase = corpus[epoch:]
     dataset = LazyCorpusDataset(corpus_at_phase, seq_len)
@@ -377,15 +374,38 @@ def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device, shuffle
     return dataloader
 
 
+###########################################################################################################################
 
+
+# Initialize the weights using "He" initialization:
 def init_weights(m):
     if isinstance(m, nn.Conv1d):
         nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
         if m.bias is not None:
             nn.init.constant_(m.bias, 0)
 
+# Preprocess the corpus data as raw 8-bit binary data:
+def read_corpus(file_path, max_chars=None):
+    with open(file_path, "rb") as f:
+        corpus = f.read(max_chars)
+    return corpus
+
+# Save the model and optimizer:
+def save_model(model, file_path):
+    torch.save(model.state_dict(), file_path)
+
+def save_optimizer(optimizer, file_path):
+    torch.save(optimizer.state_dict(), file_path)
+
+# Load the model and optimizer:
+def load_model(model, file_path, device):
+    model.load_state_dict(torch.load(file_path, map_location=device))
+
+def load_optimizer(optimizer, file_path, device):
+    optimizer.load_state_dict(torch.load(file_path, map_location=device))
 
 
+###########################################################################################################################
 # Train the model:
 def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epochs, shuffle):
     # with torch.autograd.set_detect_anomaly(True):    
@@ -394,8 +414,12 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
 
     start_time = time.time()
 
-    # this must take into account the seq_len and the batch_size
-    total_num_batches = len(corpus) // (seq_len*batch_size)
+    # # EXPERIMENTAL CODE
+    # # Enable this code to turn on weight decay for fine-tuning.
+    # # This could help with generalization performance.
+    #for param_group in optimizer.param_groups:
+    #    param_group['weight_decay'] = 0.1 # try higher and lower values
+
 
     scheduler = ExponentialLR(optimizer, gamma=LR_GAMMA)
     for epoch in range(num_epochs):
@@ -412,7 +436,10 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
         # input sequences:
         dataloader = create_phased_dataloader(epoch, corpus, batch_size, seq_len, device, shuffle) 
 
-        epoch_loss = 0.0
+
+        num_batches_per_epoch = len(dataloader)
+        run_avg_loss          = 0.0
+        epoch_loss            = 0.0
         for batch_idx, (input_sequences, target_sequences) in enumerate(dataloader):
             # Send the input and target sequences to the device:
             input_sequences  = input_sequences.to(device)
@@ -436,44 +463,39 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
             scaler.step(optimizer)
             scaler.update()
 
-            epoch_loss += loss.item()
-
+            cur_loss               = loss.item()
+            epoch_loss            += cur_loss
             num_batches_completed += 1
-            progress_pct = num_batches_completed / total_num_batches * 100
-            print(f"\rEpoch Progress: {progress_pct:7.3f}%", end="", flush=True)
+            leakage                = 1.0/(batch_idx+1) if batch_idx < 98 else 0.01
+            run_avg_loss           = cur_loss*leakage +  run_avg_loss*(1.0 - leakage)
+
+            epoch_time_elapsed       = time.time() - epoch_start_time
+            progress_pct             = num_batches_completed / num_batches_per_epoch * 100
+            epoch_remaining_time     = epoch_time_elapsed / progress_pct * (100 - progress_pct)
+            epoch_projected_end_time = datetime.datetime.now() + datetime.timedelta(seconds=epoch_remaining_time)
+            print(f"\rEpoch {epoch+1:2d} - Progress: {progress_pct:7.3f}% ETA: {epoch_projected_end_time.strftime('%H:%M:%S')} Loss: {run_avg_loss:.5f}", end="", flush=True)
         print("\r", end="", flush=True)
 
 
         old_lr = optimizer.param_groups[0]["lr"]
         scheduler.step()
         new_lr = optimizer.param_groups[0]["lr"]
-        epoch_stop_time = time.time()
-        epoch_elapsed_time = epoch_stop_time - epoch_start_time
-        remaining_epochs = num_epochs - epoch - 1
-        remaining_time = datetime.timedelta(seconds=remaining_epochs * epoch_elapsed_time)
-        end_time = datetime.datetime.now() + remaining_time
-        avg_loss = epoch_loss / len(dataloader)
-        
-        print(f"Epoch {epoch + 1}/{num_epochs} Loss:{avg_loss:.5f} LR:{old_lr:.5f}->{new_lr:.5f} dT:{epoch_elapsed_time:6.2f} ETA:{end_time.strftime('%H:%M:%S')} ", flush=True)
 
-    stop_time = time.time()
+        epoch_stop_time    = time.time()
+        epoch_elapsed_time = epoch_stop_time - epoch_start_time
+        remaining_epochs   = num_epochs - epoch - 1
+        remaining_time     = datetime.timedelta(seconds=remaining_epochs * epoch_elapsed_time)
+        end_time           = datetime.datetime.now() + remaining_time
+        avg_loss           = epoch_loss / num_batches_per_epoch
+        
+        print(f"Epoch {epoch + 1}/{num_epochs} Loss:{avg_loss:.5f} LR:{old_lr:.5f}->{new_lr:.5f} dT:{epoch_elapsed_time:6.2f} Finish:{end_time.strftime('%H:%M:%S')} ", flush=True)
+
+    stop_time    = time.time()
     elapsed_time = stop_time - start_time
     print(f"Training time: {elapsed_time:.2f} seconds")
 
-# Save the model and optimizer:
-def save_model(model, file_path):
-    torch.save(model.state_dict(), file_path)
 
-def save_optimizer(optimizer, file_path):
-    torch.save(optimizer.state_dict(), file_path)
-
-# Load the model and optimizer:
-def load_model(model, file_path, device):
-    model.load_state_dict(torch.load(file_path, map_location=device))
-
-def load_optimizer(optimizer, file_path, device):
-    optimizer.load_state_dict(torch.load(file_path, map_location=device))
-
+###########################################################################################################################
 # Generate text using the model. The seed_str is the initial context.
 #   Note that the length of the seed_str acts as the "warmup". The model will first
 #   be fed with the seed_str, one character at a time, as warmup. Then the model
@@ -526,6 +548,7 @@ def generate_text(model, seed_str, temperature, seq_len, device, vocab_size):
     print("\n")   
 
 
+###########################################################################################################################
 # This is the main function. It first determines the mode,
 # then does what it needs to do based on the emode.
 def main():
