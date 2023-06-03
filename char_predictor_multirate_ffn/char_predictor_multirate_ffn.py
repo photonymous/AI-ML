@@ -57,14 +57,15 @@ USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 # # Version 1.0 of a medium-sized (13M parameters) trained model. Produces loss of 0.49.
 # # Exhibits good gramatical structure, but doesn't seem to know much about the meaning of words, and
 # # doesn't seem to be using the context very well. The subject changes continuously.
+# CUDA_DEVICE         = 0
 # MODE                = "generate"
 # #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
 # #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
 # SEED_STR            = """John got a new blue ball. He showed it to all his neighbors. He showed it to Lucy, who really liked it. Then he showed it to Ben. Ben did not like the ball becuase he doesn't like the color. They got into an argument about the colo"""
 # EMBEDDING_LEN       = 64
 # SEQ_LEN             = 2048 
-# WARMUP              = 0
 # NUM_EPOCHS          = 10
+# SHUFFLE             = True
 # FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
 # CONVNET_HIDDEN_DIMS = [[512,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
 # PREDNET_HIDDEN_DIMS = [2048,1024,1024,512,256]
@@ -72,63 +73,64 @@ USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 # MAX_CHARS           = 1959000000 #2**30
 # #CORPUS_FILE         = "/data/training_data/wiki.train.raw" #"/data/training_data/gutenberg_corpus_21MB.txt"
 # CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
-# MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn_v1.pth"
+# MODEL_FILE          = "/home/mrbuehler/GIT/AI-ML/trained_models/trained_mrffn_v1.pth"
+
+# # ==================================================================================================
+# # Version 2. New "big" model with 26M parameters. Loss is < 0.42.
+# CUDA_DEVICE         = 0
+# MODE                = "train"
+# #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
+# #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
+# #SEED_STR            = """Once upon a time, there was a little dog named Charlie."""
+# SEED_STR            = """Story: Timmy loves trains. One day, he and his dad went to the train station. While at the train station, they read books, explored, and ate lunch. After a long time,"
+# """
+# TEMPERATURE         = 0.25  # only used for generation. Very low values are very deterministic. 1.0 draws from the exact distribution. Higher values are more random.
+# EMBEDDING_LEN       = 64
+# SEQ_LEN             = 4096 
+# NUM_EPOCHS          = 5
+# SHUFFLE             = True
+# FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
+# CONVNET_HIDDEN_DIMS = [[512,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
+# PREDNET_HIDDEN_DIMS = [4096,2048,1024,512,256]
+# BATCH_SIZE          = 16
+# MAX_CHARS           = 1959000000 #2**26 #2**30
+# CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
+# MODEL_FILE          = "/home/mrbuehler/GIT/AI-ML/trained_models/trained_mrffn_v2_7stages.pth"
 
 # ==================================================================================================
-# Version 2. New "big" model with 26M parameters. Loss is < 0.42.
+# Version 3. Experimenting with AMP (for FP16) 
 CUDA_DEVICE         = 0
 MODE                = "train"
 #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
 #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
-#SEED_STR            = """Once upon a time, there was a little dog named Charlie."""
-SEED_STR            = """Story: Timmy loves trains. One day, he and his dad went to the train station. While at the train station, they read books, explored, and ate lunch. After a long time,"
-"""
+SEED_STR            = """John got"""
 TEMPERATURE         = 0.25  # only used for generation. Very low values are very deterministic. 1.0 draws from the exact distribution. Higher values are more random.
-EMBEDDING_LEN       = 64
-SEQ_LEN             = 4096 
-WARMUP              = 0
-NUM_EPOCHS          = 5
+EMBEDDING_LEN       = 32
+SEQ_LEN             = 256 
+NUM_EPOCHS          = 1
+SHUFFLE             = True
 FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-CONVNET_HIDDEN_DIMS = [[512,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
-PREDNET_HIDDEN_DIMS = [4096,2048,1024,512,256]
-BATCH_SIZE          = 16
-MAX_CHARS           = 1959000000 #2**26 #2**30
+CONVNET_HIDDEN_DIMS = [[256,128],[128,128],[128,128],[128,128],[128,128],[128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
+PREDNET_HIDDEN_DIMS = [2048,1024,512,256]
+BATCH_SIZE          = 128
+MAX_CHARS           = 2**23 #2**26 #2**30
 CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
-MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_models/trained_mrffn_v2_7stages.pth"
-
-# # ==================================================================================================
-# # Version 3. Experimenting with AMP (for FP16) 
-# MODE                = "generate"
-# #                         0        1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         0         1         2         3         4         5         6         7         8         9         
-# #                         1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890
-# SEED_STR            = """John got"""
-# TEMPERATURE         = 0.25  # only used for generation. Very low values are very deterministic. 1.0 draws from the exact distribution. Higher values are more random.
-# EMBEDDING_LEN       = 32
-# SEQ_LEN             = 256 
-# WARMUP              = 0
-# NUM_EPOCHS          = 10
-# FIFO_LEN            = 4 # <-- This is the number of embedded characters that the first convolutional layer uses to compute its output. All subsequent stages reuse this value.
-# CONVNET_HIDDEN_DIMS = [[256,128],[128,128],[128,128],[128,128],[128,128],[128,128]] # <-- This is a list of lists. Each list is the hidden dimensions for a convenet stage. The number of convnets in a stage is the length of each list.
-# PREDNET_HIDDEN_DIMS = [2048,1024,512,256]
-# BATCH_SIZE          = 128
-# MAX_CHARS           = 2**24 #2**26 #2**30
-# CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
-# MODEL_FILE          = "/home/mrbuehler/pcloud/GIT/AI-ML/trained_mrffn_v3.pth"
+MODEL_FILE          = "/home/mrbuehler/GIT/AI-ML/trained_models/trained_mrffn_v3.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
 parser = argparse.ArgumentParser(description='Train or generate text using a character predicting RNN.')
 parser.add_argument('--cuda_device',         type=int,   default=CUDA_DEVICE, help='The GPU to run on (0-based) (default: %(default)s)')
-parser.add_argument('--mode',                type=str,   default=MODE, help='The mode: train or generate (default: %(default)s)')
+parser.add_argument('--mode',                type=str,   default=MODE, help='The mode: train, finetune, or generate (default: %(default)s)')
 parser.add_argument('--seed_str',            type=str,   default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
 parser.add_argument('--temperature',         type=float, default=TEMPERATURE, help='The temperature to use for generating text (default: %(default)s)')
 parser.add_argument('--embedding_len',       type=int,   default=EMBEDDING_LEN, help='The embedding length (default: %(default)s)')
 parser.add_argument('--seq_len',             type=int,   default=SEQ_LEN, help='The sequence length (default: %(default)s)')
-parser.add_argument('--warmup',              type=int,   default=WARMUP, help='The warmup (default: %(default)s)')
 parser.add_argument('--fifo_len',            type=int,   default=FIFO_LEN, help='The FIFO length (default: %(default)s)')
 parser.add_argument('--convnet_hidden_dims', type=ast.literal_eval,   default=CONVNET_HIDDEN_DIMS, help='The convnet hidden dimensions (default: %(default)s)')
 parser.add_argument('--prednet_hidden_dims', type=ast.literal_eval,   default=PREDNET_HIDDEN_DIMS, help='The prediction network hidden dimensions (default: %(default)s)')
 parser.add_argument('--num_epochs',          type=int,   default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
+parser.add_argument('--shuffle',             type=bool,  default=SHUFFLE, help='Whether to shuffle the data (default: %(default)s)')
 parser.add_argument('--batch_size',          type=int,   default=BATCH_SIZE, help='The batch size (default: %(default)s)')
 parser.add_argument('--max_chars',           type=int,   default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
 parser.add_argument('--corpus_file',         type=str,   default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
@@ -178,9 +180,6 @@ class PredNet(nn.Module):
 
         #tuple_of_tensors = (input1[:,:,:seq_len],) + tuple(input2[jj][:,:,:seq_len] for jj in range(len(input2)))
     
-        # # OLD: Because each stage decimates, we need to use repeat_interleave() to upsample the stage outputs we put into the tuple_of_tensors.
-        # # OLD: The upsampling factor is 2**(stage_idx+1), where stage_idx is 0 based
-        # Each stage (except the first stage) decimates by 2:
         tuple_of_tensors = (input1[:,:,:seq_len],)
         for jj in range(len(input2)):
             # Upsample the convnet output by the appropriate factor:
@@ -191,6 +190,7 @@ class PredNet(nn.Module):
 
         # TODO: Once the context length is too long, we will need to chunk it up and iterate over chunks of
         #       sequence elements, so this will need a second for loop.
+
         # Concatenate the tensors in the tuple along the 2nd dimension:
         input = torch.cat(tuple_of_tensors, dim=1)
         # Transpose the result to make the shape (batch_size, seq_len, input_dim):
@@ -370,10 +370,10 @@ class LazyCorpusDataset(Dataset):
 
 
 
-def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device):
+def create_phased_dataloader(epoch, corpus, batch_size, seq_len, device, shuffle):
     corpus_at_phase = corpus[epoch:]
     dataset = LazyCorpusDataset(corpus_at_phase, seq_len)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
     return dataloader
 
 
@@ -387,14 +387,9 @@ def init_weights(m):
 
 
 # Train the model:
-#def train_model(model, dataloader, device, num_epochs, warmup):
-def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup):
-    # with torch.autograd.set_detect_anomaly(True):
-    model.apply(init_weights)
-    model.train()
-    model.to(device)
+def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epochs, shuffle):
+    # with torch.autograd.set_detect_anomaly(True):    
     criterion = nn.NLLLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, eps=1e-4) # eps is used to prevent NaNs in the loss
     scaler    = torch.cuda.amp.GradScaler(enabled=USE_AMP)
 
     start_time = time.time()
@@ -408,7 +403,6 @@ def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup):
 
         num_batches_completed = 0
 
-
         # Because each stage decimates, the top stage ends up seeing a small number of identical examples
         # epoch after epoch. But we can use a data augmentation strategy to mitigate this. Since the corupus is
         # reshaped to create the input sequences, we can start the process at a different character for each
@@ -416,7 +410,7 @@ def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup):
         # create a new dataloader for each epoch. We can do this by creating a function that returns a dataloader
         # for a given epoch index, where the epoch index is used to determine the starting character for the
         # input sequences:
-        dataloader = create_phased_dataloader(epoch, corpus, batch_size, seq_len, device) 
+        dataloader = create_phased_dataloader(epoch, corpus, batch_size, seq_len, device, shuffle) 
 
         epoch_loss = 0.0
         for batch_idx, (input_sequences, target_sequences) in enumerate(dataloader):
@@ -430,10 +424,6 @@ def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup):
             # Forward pass using AMP for FP16:
             with torch.autocast(device_type=device, dtype=torch.float16, enabled=USE_AMP):
                 outputs = model(input_sequences)
-
-                # Compute the loss:
-                outputs = outputs[:, warmup:, :]
-                target_sequences = target_sequences[:, warmup:]
 
                 # Now reshape the outputs and targets:            
                 outputs = outputs.reshape(-1, VOCAB_SIZE)
@@ -470,24 +460,25 @@ def train_model(model, corpus, batch_size, seq_len, device, num_epochs, warmup):
     elapsed_time = stop_time - start_time
     print(f"Training time: {elapsed_time:.2f} seconds")
 
-# Save the model:
+# Save the model and optimizer:
 def save_model(model, file_path):
     torch.save(model.state_dict(), file_path)
 
-# Load the model:
+def save_optimizer(optimizer, file_path):
+    torch.save(optimizer.state_dict(), file_path)
+
+# Load the model and optimizer:
 def load_model(model, file_path, device):
     model.load_state_dict(torch.load(file_path, map_location=device))
+
+def load_optimizer(optimizer, file_path, device):
+    optimizer.load_state_dict(torch.load(file_path, map_location=device))
 
 # Generate text using the model. The seed_str is the initial context.
 #   Note that the length of the seed_str acts as the "warmup". The model will first
 #   be fed with the seed_str, one character at a time, as warmup. Then the model
 #   will be fed with its own output, one character at a time to generate the text.
 def generate_text(model, seed_str, temperature, seq_len, device, vocab_size):
-    
-    # TODO: Implement a forward-only version of the model that doesn't use
-    #       convolution. It should use actual fifos, and should pull its
-    #       weights from the trained model.
-
     model.eval()
     model.to(device)
 
@@ -531,7 +522,6 @@ def generate_text(model, seed_str, temperature, seq_len, device, vocab_size):
         predicted_char_idx += 1
 
         # print the progress, overwritng the previous output:
-        #print(f"{predicted_char_idx / seq_len * 100:.0f}%", end="\r", flush=True)
         print(chr(predicted_char), end="", flush=True)
     print("\n")   
 
@@ -546,6 +536,9 @@ def main():
         # Create the model:   
         model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
 
+        # Initialize the weights:
+        model.apply(init_weights)
+
         # Print out the total number of parameters, then the number of weights and biases for each layer, and the
         # number of embedding parameters:
         print(f"Total number of parameters: {sum(p.numel() for p in model.parameters())}", flush=True)
@@ -553,11 +546,38 @@ def main():
             print(f"{name} {param.numel()}", flush=True)
         
         # Train the model:
-        #train_model(model, dataloader, "cuda" if torch.cuda.is_available() else "cpu", args.num_epochs, args.warmup)
-        train_model(model, corpus, args.batch_size, args.seq_len, "cuda" if torch.cuda.is_available() else "cpu", args.num_epochs, args.warmup) #NEW
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.train()
+        model.to(device)
+        optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, eps=1e-4) # eps is used to prevent NaNs in the loss
+        train_model(model, optimizer, corpus, args.batch_size, args.seq_len, device, args.num_epochs, args.shuffle)
 
-        # Save the model:
+        # Save the model and optimizer:
         save_model(model, args.model_file)
+        save_optimizer(optimizer, args.model_file + ".opt")
+
+    elif args.mode == "finetune":
+        # Read the corpus:
+        corpus = read_corpus(args.corpus_file, args.max_chars)
+
+        # Create the model:
+        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
+
+        # Load the model:
+        load_model(model, args.model_file, "cuda" if torch.cuda.is_available() else "cpu")
+
+        # Train the model:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model.train()
+        model.to(device)
+        optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, eps=1e-4) # eps is used to prevent NaNs in the loss
+        load_optimizer(optimizer, args.model_file + ".opt", device)
+        train_model(model, optimizer, corpus, args.batch_size, args.seq_len, device, args.num_epochs, args.shuffle)
+
+        # Save the model and optimizer:
+        save_model(model, args.model_file)
+        save_optimizer(optimizer, args.model_file + ".opt")
+
     elif args.mode == "generate":
         # Create the model:
         model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
