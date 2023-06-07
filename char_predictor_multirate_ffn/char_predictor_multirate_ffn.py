@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # This will be a character predicting neural network. From an external vantage point
 # it will behave like the CharPredictorRNN (one char in, one char out, with internal 
 # state). Internally, however, it will be structured as follows. There will be 
@@ -41,6 +43,7 @@ from typing import List
 from torch import Tensor
 import cProfile
 import pstats
+import select
 #import os
 
 #os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -553,6 +556,8 @@ def generate_text(model, seed_str, temperature, seq_len, device, vocab_size):
 # This is the main function. It first determines the mode,
 # then does what it needs to do based on the emode.
 def main():
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     if args.mode == "train":
         # Read the corpus:
         corpus = read_corpus(args.corpus_file, args.max_chars)
@@ -570,7 +575,6 @@ def main():
             print(f"{name} {param.numel()}", flush=True)
         
         # Train the model:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
         model.train()
         model.to(device)
         optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, eps=1e-4) # eps is used to prevent NaNs in the loss
@@ -588,10 +592,9 @@ def main():
         model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
 
         # Load the model:
-        load_model(model, args.model_file, "cuda" if torch.cuda.is_available() else "cpu")
+        load_model(model, args.model_file, device)
 
         # Train the model:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
         model.train()
         model.to(device)
         optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, eps=1e-4) # eps is used to prevent NaNs in the loss
@@ -603,14 +606,24 @@ def main():
         save_optimizer(optimizer, args.model_file + ".opt")
 
     elif args.mode == "generate":
+        # Check to see of anything was passed in on stdin:
+        read_stdin = False
+        if select.select([sys.stdin,],[],[],0.0)[0]:
+            read_stdin = True
+
+        # If something was passed in on stdin, then use it to replace the seed_str:
+        seed_str = args.seed_str
+        if read_stdin:
+            seed_str = sys.stdin.read()
+        
         # Create the model:
         model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
 
         # Load the model:
-        load_model(model, args.model_file, "cuda" if torch.cuda.is_available() else "cpu")
+        load_model(model, args.model_file, device)
 
         # Generate text:
-        generated_text = generate_text(model, args.seed_str, args.temperature, args.seq_len, "cuda" if torch.cuda.is_available() else "cpu", VOCAB_SIZE)
+        generated_text = generate_text(model, seed_str, args.temperature, args.seq_len, device, VOCAB_SIZE)
 
     else:
         print("Invalid mode: " + args.mode)

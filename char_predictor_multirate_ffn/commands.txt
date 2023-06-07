@@ -23,3 +23,16 @@ Baseline:
 python3 char_predictor_multirate_ffn.py --mode 'generate' --temperature 0.2 --convnet_hidden_dims '[[512,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256],[256,256,256]]' --model_file ../trained_models/trained_mrffn_10stages.pth
 
 
+Big Temple:
+===========
+Notes on training: It was first trained with LR=0.001 and no weight decay. Gamma was 0.5, so after the TinyStories, LR automatically dropped to 0.5.
+   Then it was then fine-tuned on GP twice, but for the second fine-tuning, shuffle was turned on so that it wouldn't adapt to whatever text it was
+   reading and wouldn't be overly fit to the end of the training set. Also, weight decay was set to 0.1 for the 2nd fine-tuning.
+
+Notes on generation: A temperature of 0.4 seems to produce the most interesting results.
+
+python3 char_predictor_multirate_ffn.py --mode 'train'    --cuda_device 0 --shuffle 1 --embedding_len 64 --seq_len 4096 --num_epochs 1 --batch_size 8  --max_chars  1959000000 --convnet_hidden_dims '[[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512]]' --prednet_hidden_dims '[4096,2048,1024,512,256]' --corpus_file /data/training_data/TinyStories-train.txt             --model_file ../trained_models/temple_TS1.pth
+python3 char_predictor_multirate_ffn.py --mode 'finetune' --cuda_device 0 --shuffle 0 --embedding_len 64 --seq_len 4096 --num_epochs 1 --batch_size 16 --max_chars 18280000000 --convnet_hidden_dims '[[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512]]' --prednet_hidden_dims '[4096,2048,1024,512,256]' --corpus_file /data/training_data/gutenberg/data/english_corpus.txt --model_file ../trained_models/temple_GP2.pth
+python3 char_predictor_multirate_ffn.py --mode 'finetune' --cuda_device 0 --shuffle 1 --embedding_len 64 --seq_len 4096 --num_epochs 1 --batch_size 16 --max_chars 18280000000 --convnet_hidden_dims '[[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512]]' --prednet_hidden_dims '[4096,2048,1024,512,256]' --corpus_file /data/training_data/gutenberg/data/english_corpus.txt --model_file ../trained_models/temple_GP3.pth
+
+python3 char_predictor_multirate_ffn.py --mode 'generate' --cuda_device 0 --shuffle 1 --embedding_len 64 --seq_len 4096 --num_epochs 1 --batch_size 16 --max_chars 18280000000 --convnet_hidden_dims '[[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512],[1024,512,512]]' --prednet_hidden_dims '[4096,2048,1024,512,256]' --corpus_file /data/training_data/gutenberg/data/english_corpus.txt --model_file ../trained_models/temple_GP3.pth --temperature 0.4 --seed_str "head master"
