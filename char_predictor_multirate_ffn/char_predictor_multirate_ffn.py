@@ -48,8 +48,8 @@ import pstats
 # Specify all global constants that aren't arguments:
 VOCAB_SIZE     = 256
 LEARNING_RATE  = 0.001
-LR_GAMMA       = 0.9
-WEIGHT_DECAY   = 0.0
+LR_GAMMA       = 0.5
+WEIGHT_DECAY   = 0.1
 USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 
@@ -417,8 +417,8 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
     # # EXPERIMENTAL CODE
     # # Enable this code to turn on weight decay for fine-tuning.
     # # This could help with generalization performance.
-    #for param_group in optimizer.param_groups:
-    #    param_group['weight_decay'] = 0.1 # try higher and lower values
+    # for param_group in optimizer.param_groups:
+    #     param_group['weight_decay'] = 0.1 # try higher and lower values
 
 
     scheduler = ExponentialLR(optimizer, gamma=LR_GAMMA)
@@ -473,7 +473,7 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
             progress_pct             = num_batches_completed / num_batches_per_epoch * 100
             epoch_remaining_time     = epoch_time_elapsed / progress_pct * (100 - progress_pct)
             epoch_projected_end_time = datetime.datetime.now() + datetime.timedelta(seconds=epoch_remaining_time)
-            print(f"\rEpoch {epoch+1:2d} - Progress: {progress_pct:7.3f}% ETA: {epoch_projected_end_time.strftime('%H:%M:%S')} Loss: {run_avg_loss:.5f}", end="", flush=True)
+            print(f"\rEpoch {epoch+1:2d} - Progress: {progress_pct:7.3f}%, Loss: {run_avg_loss:.5f}, ETA: {epoch_projected_end_time.strftime('%H:%M:%S')}", end="", flush=True)
         print("\r", end="", flush=True)
 
 
@@ -488,7 +488,7 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
         end_time           = datetime.datetime.now() + remaining_time
         avg_loss           = epoch_loss / num_batches_per_epoch
         
-        print(f"Epoch {epoch + 1}/{num_epochs} Loss:{avg_loss:.5f} LR:{old_lr:.5f}->{new_lr:.5f} dT:{epoch_elapsed_time:6.2f} Finish:{end_time.strftime('%H:%M:%S')} ", flush=True)
+        print(f"Epoch {epoch + 1}/{num_epochs} Loss:{run_avg_loss:.4f},{avg_loss:.4f} LR:{old_lr:.5f}->{new_lr:.5f} dT:{epoch_elapsed_time:6.2f} Finish:{end_time.strftime('%H:%M:%S')} ", flush=True)
 
     stop_time    = time.time()
     elapsed_time = stop_time - start_time
@@ -500,6 +500,7 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
 #   Note that the length of the seed_str acts as the "warmup". The model will first
 #   be fed with the seed_str, one character at a time, as warmup. Then the model
 #   will be fed with its own output, one character at a time to generate the text.
+@torch.no_grad()
 def generate_text(model, seed_str, temperature, seq_len, device, vocab_size):
     model.eval()
     model.to(device)
@@ -526,7 +527,7 @@ def generate_text(model, seed_str, temperature, seq_len, device, vocab_size):
     context[predicted_char_idx+1] = predicted_char
     predicted_char_idx += 1    
 
-    print(SEED_STR, ":", end="", flush=True)
+    print(seed_str, ":", chr(predicted_char), end="", flush=True)
     # Now we can start generating the text. We'll do this by filling the rest of the context    
     while predicted_char_idx < seq_len-1:
         context_tensor = torch.tensor(context, dtype=torch.long, device=device)

@@ -3,6 +3,10 @@ Temple:
 =======
 python3 char_predictor_multirate_ffn.py --mode 'generate' --temperature 0.2 --convnet_hidden_dims '[[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256]]' --prednet_hidden_dims '[2048,2048,1024,512,256]' --model_file ../trained_models/trained_mrffn_temple.pth
 
+Temple: (train on TinyStories, then fine-tune on Gutenberg)
+==============================
+python3 char_predictor_multirate_ffn.py --mode 'train'    --cuda_device 0 --shuffle 1 --embedding_len 64 --seq_len 4096 --num_epochs 1 --batch_size 16 --max_chars  1959000000 --convnet_hidden_dims '[[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256]]' --prednet_hidden_dims '[2048,2048,1024,512,256]' --corpus_file /data/training_data/TinyStories-train.txt             --model_file ../trained_models/trained_mrffn_temple_TS.pth
+python3 char_predictor_multirate_ffn.py --mode 'finetune' --cuda_device 0 --shuffle 0 --embedding_len 64 --seq_len 4096 --num_epochs 1 --batch_size 16 --max_chars 18280000000 --convnet_hidden_dims '[[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256],[1024,512,256]]' --prednet_hidden_dims '[2048,2048,1024,512,256]' --corpus_file /data/training_data/gutenberg/data/english_corpus.txt --model_file ../trained_models/trained_mrffn_temple_GP.pth
 
 Fat2 (trained remotely):
 ========================
