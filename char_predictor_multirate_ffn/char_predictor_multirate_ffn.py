@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 
-# This will be a character predicting neural network. From an external vantage point
-# it will behave like the CharPredictorRNN (one char in, one char out, with internal 
-# state). Internally, however, it will be structured as follows. There will be 
+# This is a character predicting neural network. There are 
 # multiple stages. The first stage is a multilayer feedforward neural network that
-# conlvolves along the input data. Its ouptut is updated every other input sample.
+# conlvolves along the input data. Its ouptut is updated every input sample.
 # The second stage behaves the same way, taking the output of the first stage as
-# input and updating every other sample, so its update rate is 1/4th of the initial
+# input but updating every other sample, so its update rate is 1/2th of the initial
 # input rate. The third stage behaves the same way, taking the output of the second
-# stage as input and updating every other sample, so its update rate is 1/8th of the
+# stage as input and updating every other sample, so its update rate is 1/4th of the
 # initial input rate. And so on. The final stage is a prediction network that takes
 # its input from all of the previous stages' most recent outputs, including the
 # embedding layer which provides the initial input to the network. The prediction
@@ -58,7 +56,7 @@ USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 # ==================================================================================================
 CUDA_DEVICE         = -1
 MODE                = "generate"
-SEED_STR            = """Ben was playing outside in the garden by himself."""
+SEED_STR            = """read the book read the book read the book"""
 TEMPERATURE         = 0.4  
 EMBEDDING_LEN       = 32
 SEQ_LEN             = 256 
@@ -74,7 +72,7 @@ MODEL_FILE          = "/data/trained_models/small.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
-parser = argparse.ArgumentParser(description='Train or generate text using a character predicting RNN.')
+parser = argparse.ArgumentParser(description='Train or generate text using a character predicting network.')
 parser.add_argument('--cuda_device',         type=int,   default=CUDA_DEVICE, help='The GPU to run on. -1 = use all GPUs. (default: %(default)s)')
 parser.add_argument('--mode',                type=str,   default=MODE, help='The mode: train, finetune, or generate (default: %(default)s)')
 parser.add_argument('--seed_str',            type=str,   default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
@@ -98,11 +96,8 @@ if args.cuda_device < 0:
 ###########################################################################################################################
 
 # Define the prediction network class. It will iterate over the sequence, and for each character in the sequence,
-# it will predict the next character in the sequence. It will use the output of the last convolutional layer
-# and the output of the embedding layer as input. It will just use one linear layer for now.
-# Also, by pre-declaring the output tensor and iterating over the sequence length, we will automatically
-# be pruning off the last outputs from the convolution, which were invalid for prediction. Our output will
-# have a 1:1 mapping between the input and target sequences.
+# it will predict the next character in the sequence. It will use the most recent output of each stage, as well
+# as the output of the embedding layer as input. 
 class PredNet(nn.Module):
     def __init__(self, input_dim, hidden_dims, output_dim):
         super(PredNet, self).__init__()
@@ -111,8 +106,8 @@ class PredNet(nn.Module):
         self.output_dim  = output_dim
         self.hidden_dims = hidden_dims
 
-        # Create the layers using a list and Sequential(). We need ReLU() between the linear layers, but the
-        # last layer should not have a ReLU() after it because we want the output to be a probability distribution
+        # Create the layers using a list and Sequential(). We need PReLU() between the linear layers, but the
+        # last layer should not have a PReLU() after it because we want the output to be a probability distribution
         # and softmax will be applied to it later in before the loss function. Also, the last layer should have
         # dimensionality equal to the number of characters in the vocabulary and is its own special layer. If
         # hidden_dims is empty we will still have this output layer.
