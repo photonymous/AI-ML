@@ -90,7 +90,7 @@ parser.add_argument('--corpus_file',         type=str,   default=CORPUS_FILE, he
 parser.add_argument('--model_file',          type=str,   default=MODEL_FILE, help='The model file (default: %(default)s)')
 args = parser.parse_args()
 
-if args.cuda_device < 0:
+if args.cuda_device > -1:
     torch.cuda.set_device(args.cuda_device)
 
 ###########################################################################################################################
