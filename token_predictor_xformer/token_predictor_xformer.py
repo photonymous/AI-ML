@@ -29,13 +29,23 @@ import random
 from math import sqrt
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
 
+# Specify all global constants that aren't arguments:
+VOCAB_SIZE     = 50257
+LEARNING_RATE  = 0.001
+LR_GAMMA       = 1.0
+WEIGHT_DECAY   = 0.1
+#USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
+# TODO: 
+# 1. Add AMP
+# 2. Utilize multiple GPUs
+
 # ==================================================================================================
 CUDA_DEVICE         = 0
-MODE                = "generate"
+MODE                = "train"
 SEED_STR            = """Once upon a time, there was """
 TEMPERATURE         = 0.4  
-EMBEDDING_LEN       = 32
-CONTEXT_LEN         = 256 # tokens
+EMBEDDING_LEN       = 64
+CONTEXT_LEN         = 16 # tokens
 NUM_EPOCHS          = 1
 SHUFFLE             = True
 NUM_LAYERS          = 4
@@ -43,121 +53,218 @@ NUM_HEADS           = 4
 HIDDEN_DIM          = 4*EMBEDDING_LEN
 BATCH_SIZE          = 128
 MAX_CHARS           = 2**24 #2**30
-CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
+CORPUS_FILE         = "/data/training_data/TinyStories-train.tokens"
 MODEL_FILE          = "/data/trained_models/xformer.pth"
 
 
-# Temporarily leave PositionalEncoding module here. Will be moved somewhere else.
-class PositionalEncoding(nn.Module):
-    r"""Inject some information about the relative or absolute position of the tokens in the sequence.
-        The positional encodings have the same dimension as the embeddings, so that the two can be summed.
-        Here, we use sine and cosine functions of different frequencies.
-    .. math:
-        \text{PosEncoder}(pos, 2i) = sin(pos/10000^(2i/d_model))
-        \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
-        \text{where pos is the word position and i is the embed idx)
-    Args:
-        d_model: the embed dim (required).
-        dropout: the dropout value (default=0.1).
-        max_len: the max. length of the incoming sequence (default=5000).
-    Examples:
-        >>> pos_encoder = PositionalEncoding(d_model)
-    """
 
-    def __init__(self, d_model, dropout=0.1, max_len=5000):
-        super(PositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(p=dropout)
 
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
-        self.register_buffer('pe', pe)
+# Define our model. Initially, it will just be
+# a feed forward network with a single hidden layer
+# and a softmax output layer. It will take in the
+# context_len tokens as its input, and output a
+# distribution over the next token in the sequence.
+class TokenPredictor(nn.Module):
+    def __init__(self, vocab_size, embedding_len, context_len, num_layers, num_heads, hidden_dim):
+        super(TokenPredictor, self).__init__()
+        self.vocab_size    = vocab_size
+        self.embedding_len = embedding_len
+        self.context_len   = context_len
+        self.num_layers    = num_layers
+        self.num_heads     = num_heads
+        self.hidden_dim    = hidden_dim
+        
 
-    def forward(self, x):
-        r"""Inputs of forward function
-        Args:
-            x: the sequence fed to the positional encoder model (required).
-        Shape:
-            x: [sequence length, batch size, embed dim]
-            output: [sequence length, batch size, embed dim]
-        Examples:
-            >>> output = pos_encoder(x)
-        """
+        # Create the embedding layer:
+        self.embedding = nn.Embedding(vocab_size, embedding_len)
 
-        x = x + self.pe[:x.size(0), :]
-        return self.dropout(x)
+        ## Create the positional encoding layer:
+        #self.positional_encoding = PositionalEncoding(embedding_len, context_len)
 
-class TransformerModel(nn.Module):
-    """Container module with an encoder, a recurrent or transformer module, and a decoder."""
+        # Create some hidden layers (linear, ReLU):
+        layers = []
+        current_in_dim = embedding_len
+        for i in range(num_layers):
+            layers.append(nn.Linear(current_in_dim, hidden_dim))
+            layers.append(nn.LayerNorm(hidden_dim))
+            layers.append(nn.PReLU())
+            current_in_dim = hidden_dim
+        layers.append(nn.Linear(current_in_dim, vocab_size))
+        self.hidden_layers = nn.Sequential(*layers)
 
-    def __init__(self, ntoken, ninp, nhead, nhid, nlayers, dropout=0.5):
-        super(TransformerModel, self).__init__()
-
-        self.model_type = 'Transformer'
-        self.src_mask = None
-        self.pos_encoder = PositionalEncoding(ninp, dropout)
-        encoder_layers = TransformerEncoderLayer(ninp, nhead, nhid, dropout)
-        self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
-        self.encoder = nn.Embedding(ntoken, ninp)
-        self.ninp = ninp
-        self.decoder = nn.Linear(ninp, ntoken)
-
+        # Initialize the weights using He initialization:
         self.init_weights()
 
-    def _generate_square_subsequent_mask(self, sz):
-        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
-        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-        return mask
+    def forward(self, x):
+        # x is a tensor of shape (batch_size, context_len)
+        
+        # First, we need to embed the tokens:
+        x = self.embedding(x) # (batch_size, context_len, embedding_len)
+
+        ## Next, we need to add the positional encoding:
+        #x = self.positional_encoding(x) 
+
+        x = self.hidden_layers(x) # (batch_size, vocab_size)
+
+        x = x.reshape(-1, self.vocab_size) 
+
+        # Finally, we need to normalize it:
+        x = F.log_softmax(x, dim=1) # (batch_size, vocab_size)
+
+        return x
 
     def init_weights(self):
-        initrange = 0.1
-        nn.init.uniform_(self.encoder.weight, -initrange, initrange)
-        nn.init.zeros_(self.decoder.bias)
-        nn.init.uniform_(self.decoder.weight, -initrange, initrange)
-
-    def forward(self, src, has_mask=True):
-        if has_mask:
-            device = src.device
-            if self.src_mask is None or self.src_mask.size(0) != len(src):
-                mask = self._generate_square_subsequent_mask(len(src)).to(device)
-                self.src_mask = mask
-        else:
-            self.src_mask = None
-
-        src = self.encoder(src) * math.sqrt(self.ninp)
-        src = self.pos_encoder(src)
-        output = self.transformer_encoder(src, self.src_mask)
-        output = self.decoder(output)
-        return F.log_softmax(output, dim=-1)
+        # Initialize the weights using He initialization:
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight.data)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias.data)
+            elif isinstance(m, nn.Embedding):
+                nn.init.normal_(m.weight.data, mean=0, std=sqrt(2.0 / (m.weight.size(0) + m.weight.size(1))))
+            elif isinstance(m, nn.LayerNorm):
+                nn.init.ones_(m.weight.data)
+                nn.init.zeros_(m.bias.data)
 
 
-def train(model, device):
-    # Read the corpus file, which is raw binary 8-bit text:
+#############################################################################3
+class LazyTokenDataset(Dataset):
+    def __init__(self, corpus, context_len):
+        self.corpus = corpus
+        self.context_len = context_len
+
+    def __len__(self):
+        return len(self.corpus) - self.context_len
+
+    def __getitem__(self, idx):
+        start = idx * (self.context_len + 1)
+        sequence = self.corpus[start:start + self.context_len + 1]
+        input = sequence[:-1]
+        target = sequence[-1]
+
+        return input, target
+
+def create_dataloader(args, corpus, device):
+    # Create the dataset:
+    dataset = LazyTokenDataset(corpus, args.context_len)
+
+    # Create the dataloader:
+    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=args.shuffle, num_workers=0)
+
+    return dataloader
+
+
+######################################################################################
+class StatusReporter:
+    def __init__(self, num_epochs):
+        self.num_epochs = num_epochs
+        self.epoch = 0
+        self.start_time = time.time()
+        self.epoch_start_time = None
+
+    def start_epoch(self, num_batches):
+        self.num_batches = num_batches
+        self.epoch_start_time = time.time()
+        self.epoch += 1
+        self.run_avg_loss = 0.0
+
+    def update(self, loss, batch_idx):
+        epoch_loss              += loss
+        leakage                  = 1.0/(batch_idx+1) if batch_idx < 98 else 0.01
+        self.run_avg_loss        = loss*leakage +  self.run_avg_loss*(1.0 - leakage)
+
+        epoch_time_elapsed       = time.time() - self.epoch_start_time
+        progress_pct             = batch_idx / self.num_batches * 100
+        epoch_remaining_time     = epoch_time_elapsed / progress_pct * (100 - progress_pct)
+        epoch_projected_end_time = datetime.datetime.now() + datetime.timedelta(seconds=epoch_remaining_time)
+        print(f"\rEpoch {epoch+1:2d} - Progress: {progress_pct:7.3f}%, Loss: {self.run_avg_loss:.5f}, ETA: {epoch_projected_end_time.strftime('%H:%M:%S')}", end="", flush=True)
+        
+    def finish_epoch():
+        print("\r", end="", flush=True)        
+        epoch_stop_time    = time.time()
+        epoch_elapsed_time = epoch_stop_time - epoch_start_time
+        remaining_epochs   = num_epochs - epoch - 1
+        remaining_time     = datetime.timedelta(seconds=remaining_epochs * epoch_elapsed_time)
+        end_time           = datetime.datetime.now() + remaining_time
+        avg_loss           = epoch_loss / num_batches_per_epoch      
+        print(f"Epoch {epoch + 1}/{num_epochs} Loss:{run_avg_loss:.4f},{avg_loss:.4f}  dT:{epoch_elapsed_time:6.2f} Finish:{end_time.strftime('%H:%M:%S')} ", flush=True)
+
+    def finish(self):
+        stop_time    = time.time()
+        elapsed_time = stop_time - start_time
+        print(f"Training time: {elapsed_time:.2f} seconds")
+
+
+###########################################################################
+def train(args, device):
+
+    # Read the tokens, which are stored as uint16_t:
     with open(args.corpus_file, "rb") as f:
         corpus = f.read(args.max_chars)
+        corpus = np.frombuffer(corpus, dtype=np.uint16)
+        corpus = torch.from_numpy(corpus).to(device)
 
-        # Now tokenize into the 50257 vocabulary:
-        tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-        tokens = tokenizer.encode(corpus)
-        tokens = torch.tensor(tokens).to(device)
-
-        # Create the training data:
-        dataset = TensorDataset(tokens)
-        dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=args.shuffle)
-
-def create_model(args, device):
     # Create the model:
-    model = TransformerModel(ntoken=50257, ninp=args.ninp, nhead=args.nhead, nhid=args.nhid, nlayers=args.nlayers, dropout=args.dropout).to(device)
+    model = TokenPredictor(VOCAB_SIZE, args.embedding_len, args.context_len, args.num_layers, args.num_heads, args.hidden_dim)
 
-    # Load the model if it exists:
-    if os.path.exists(args.model_file):
-        print("Loading model from {}".format(args.model_file))
-        model.load_state_dict(torch.load(args.model_file))
+    # Print the number of parameters:
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Number of parameters: {num_params}")
+    
+    # Set the model mode and send it to the device:
+    model.train()
+    model.to(device)
 
-    return model
+    # Create the optimizer (AdamW)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
+
+    # Set the loss function:
+    criterion = nn.NLLLoss()
+
+    # Create the status reporter:
+    status_reporter = StatusReporter(args.num_epochs)
+
+    # Actually do the training:
+    for epoch in range(args.num_epochs):
+
+        # Create the data loader:
+        data_loader = create_dataloader(args, corpus, device) 
+
+
+        status_reporter.start_epoch(len(data_loader))
+
+        # Loop over the batches:
+        for batch_idx, (input, target) in enumerate(data_loader):
+            # Get the batch of data:
+            input  = input.to(device)
+            target = target.to(device)
+
+            # Zero the gradients:
+            optimizer.zero_grad()
+
+            # Forward pass:
+            output = model(input)
+
+            # Compute the loss:
+            loss = criterion(output, target)
+
+            # Backward pass:
+            loss.backward()
+
+            # Update the weights:
+            optimizer.step()
+
+            # Update the status reporter:
+            status_reporter.update(loss.item(), batch_idx)
+        
+        status_reporter.finish_epoch()
+
+    status_reporter.finish()
+
+    # Save the model and the optimizer
+    torch.save(model.state_dict(), args.model_file)
+    torch.save(optimizer.state_dict(), args.model_file + ".opt")
+
 
 
 ###########################################################################################################################
@@ -184,16 +291,15 @@ def main():
     parser.add_argument('--model_file',          type=str,   default=MODEL_FILE, help='The model file (default: %(default)s)')
     args = parser.parse_args()
 
-if args.cuda_device > -1:
-    torch.cuda.set_device(args.cuda_device)
+    if args.cuda_device > -1:
+        torch.cuda.set_device(args.cuda_device)
 
     if args.mode == "train":
-        model = create_model(args, device)
-        train(model, device)
+        train(args, device)
     elif args.mode == "finetune":
-        finetune(device)
+        finetune(args, device)
     elif args.mode == "generate":
-        generate(device)
+        generate(args, device)
 
 
 # Call the main function:

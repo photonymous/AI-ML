@@ -284,17 +284,17 @@ class CharPredictorMultirateFFN(nn.Module):
 ###########################################################################################################################
 
 
-# Create the dataset:
-class CorpusDataset(Dataset):
-    def __init__(self, input_sequences, target_sequences):
-        self.input_sequences  = input_sequences
-        self.target_sequences = target_sequences
+# # Create the dataset:
+# class CorpusDataset(Dataset):
+#     def __init__(self, input_sequences, target_sequences):
+#         self.input_sequences  = input_sequences
+#         self.target_sequences = target_sequences
 
-    def __len__(self):
-        return len(self.input_sequences)
+#     def __len__(self):
+#         return len(self.input_sequences)
 
-    def __getitem__(self, idx):
-        return self.input_sequences[idx], self.target_sequences[idx]
+#     def __getitem__(self, idx):
+#         return self.input_sequences[idx], self.target_sequences[idx]
 
 
 class LazyCorpusDataset(Dataset):
