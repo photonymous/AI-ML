@@ -47,7 +47,7 @@ import pstats
 import select
 import random
 from math import sqrt
-
+from tokenizers import Tokenizer
 
 # Specify all global constants that aren't arguments:
 VOCAB_SIZE     = 256
@@ -58,18 +58,18 @@ USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 # ==================================================================================================
 CUDA_DEVICE         = 0
-MODE                = "train"
-SEED_STR            = """read the book read the book read the book"""
+MODE                = "generate"
+SEED_STR            = """Once upon a time there was a girl named"""
 TEMPERATURE         = 0.4  
-EMBEDDING_LEN       = 32
+EMBEDDING_LEN       = 128
 SEQ_LEN             = 256 
 NUM_EPOCHS          = 1
 SHUFFLE             = True
 FIFO_LEN            = 4 
-CONVNET_HIDDEN_DIMS = [[256,128],[128,128],[128,128],[128,128],[128,128],[128,128]] 
-PREDNET_HIDDEN_DIMS = [1024,512,256]
-BATCH_SIZE          = 128
-MAX_TOKENS          = 2**24 #2**30
+CONVNET_HIDDEN_DIMS = [[4*EMBEDDING_LEN, EMBEDDING_LEN]]*6 
+PREDNET_HIDDEN_DIMS = [1024,512,VOCAB_SIZE]
+BATCH_SIZE          = 512
+MAX_TOKENS          = 2**30 #2**30
 CORPUS_FILE         = "/data/training_data/TinyStories-train.tok256"
 MODEL_FILE          = "/data/trained_models/token_predictor.pth"
 
@@ -450,52 +450,48 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
 @torch.no_grad()
 def generate_text(model, seed_str, temperature, seq_len, device, vocab_size):    
 
-    # TODO:
-    # Print to stderr:
-    print("Not implemented yet", file=sys.stderr)
-    sys.exit(1)
-    # # Create a context string filled with spaces that is seq_len long:
-    # context = [ord(' ')] * seq_len
+    # Tokenize the context string:
+    vocab_file = "/data/training_data/vocab{}.json".format(VOCAB_SIZE)
+    tokenizer = Tokenizer.from_file(vocab_file)
+    tokenized_seed_str = tokenizer.encode(seed_str)    
 
-    # # Copy the seed_str into the front of the context string:
-    # for i, c in enumerate(seed_str):
-    #     context[i] = ord(c)
+    # Create an empty context and paste the tokenized seed_str into the front of it:
+    context = [0] * seq_len
+    for index, tok_id in enumerate(tokenized_seed_str.ids):
+        context[index] = tok_id    
 
-    # context_tensor = torch.tensor(context, dtype=torch.long, device=device)
-    # context_tensor = context_tensor.unsqueeze(0)
-    # outputs = model(context_tensor)
+    context_tensor = torch.tensor(context, dtype=torch.long, device=device)
+    context_tensor = context_tensor.unsqueeze(0)
+    outputs = model(context_tensor)    
     
-    # # Outputs is the next-character prediction for each character in the context.
-    # # However, only one of these is valid, the one directly after the last character
-    # # in the seed_str. So we need to find that one and use it as the first character
-    # predicted_char_idx = len(seed_str)-1
-    # predicted_char = outputs[0, predicted_char_idx, :].argmax().item()
+    predicted_token_idx = len(tokenized_seed_str)-1
+    predicted_token = outputs[0, predicted_token_idx, :].argmax().item()
     
-    # # Now we need to replace the corresponding character in the context with the
-    # # predicted character:
-    # context[predicted_char_idx+1] = predicted_char
-    # predicted_char_idx += 1    
+    # Now we need to replace the corresponding token in the context with the
+    # predicted token:
+    context[predicted_token_idx+1] = predicted_token
+    predicted_token_idx += 1    
 
-    # print(seed_str, ":", chr(predicted_char), end="", flush=True)
-    # # Now we can start generating the text. We'll do this by filling the rest of the context    
-    # while predicted_char_idx < seq_len-1:
-    #     context_tensor = torch.tensor(context, dtype=torch.long, device=device)
-    #     context_tensor = context_tensor.unsqueeze(0)
-    #     outputs = model(context_tensor) 
+    # Now we can start generating the text. We'll do this by filling the rest of the context  
+    print(seed_str, ":", tokenizer.decode([predicted_token]), end="", flush=True)
+    while predicted_token_idx < seq_len-1:
+        context_tensor = torch.tensor(context, dtype=torch.long, device=device)
+        context_tensor = context_tensor.unsqueeze(0)
+        outputs = model(context_tensor) 
 
-    #     # The output of our model has LogSoftmax() applied already, but we went to use a temperature parameter to
-    #     # scale the logits before we apply softmax. So we need to first exponentiate the outputs, then scale them
-    #     # by the temperature, then apply softmax. We can do this all in one step using the softmax function. Then
-    #     # we can use np.random.choice() to sample from the output distribution.
-    #     probs = F.softmax(outputs[0,predicted_char_idx,:]/temperature, dim=0).cpu().data.numpy().flatten()
-    #     predicted_char = np.random.choice(vocab_size, p=probs)
+        # The output of our model has LogSoftmax() applied already, but we went to use a temperature parameter to
+        # scale the logits before we apply softmax. So we need to first exponentiate the outputs, then scale them
+        # by the temperature, then apply softmax. We can do this all in one step using the softmax function. Then
+        # we can use np.random.choice() to sample from the output distribution.
+        probs = F.softmax(outputs[0,predicted_token_idx,:]/temperature, dim=0).cpu().data.numpy().flatten()
+        predicted_token = np.random.choice(vocab_size, p=probs)
         
-    #     context[predicted_char_idx+1] = predicted_char
-    #     predicted_char_idx += 1
+        context[predicted_token_idx+1] = predicted_token
+        predicted_token_idx += 1
 
-    #     # print the progress, overwritng the previous output:
-    #     print(chr(predicted_char), end="", flush=True)
-    # print("\n")   
+        # print the progress, overwritng the previous output:
+        print(tokenizer.decode([predicted_token]), end="", flush=True)
+    print("\n")   
 
 
 ###########################################################################################################################

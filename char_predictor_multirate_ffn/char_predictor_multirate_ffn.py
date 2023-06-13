@@ -54,8 +54,8 @@ WEIGHT_DECAY   = 0.1
 USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 # ==================================================================================================
-CUDA_DEVICE         = -1
-MODE                = "generate"
+CUDA_DEVICE         = 1
+MODE                = "train"
 SEED_STR            = """read the book read the book read the book"""
 TEMPERATURE         = 0.4  
 EMBEDDING_LEN       = 32
@@ -65,10 +65,10 @@ SHUFFLE             = True
 FIFO_LEN            = 4 
 CONVNET_HIDDEN_DIMS = [[256,128],[128,128],[128,128],[128,128],[128,128],[128,128]] 
 PREDNET_HIDDEN_DIMS = [1024,512,256]
-BATCH_SIZE          = 128
-MAX_CHARS           = 2**24 #2**30
+BATCH_SIZE          = 512
+MAX_CHARS           = 1900000000 #2**24 #2**30
 CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
-MODEL_FILE          = "/data/trained_models/small.pth"
+MODEL_FILE          = "/data/trained_models/char_predictor.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
