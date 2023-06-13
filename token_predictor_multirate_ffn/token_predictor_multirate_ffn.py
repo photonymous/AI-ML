@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# This is a character predicting neural network. There are 
+# This is a token predicting neural network. There are 
 # multiple stages. The first stage is a multilayer feedforward neural network that
 # conlvolves along the input data. Its ouptut is updated every input sample.
 # The second stage behaves the same way, taking the output of the first stage as
@@ -11,8 +11,8 @@
 # its input from all of the previous stages' most recent outputs, including the
 # embedding layer which provides the initial input to the network. The prediction
 # network is a multilayer feedforward neural network that outputs a probability
-# distribution over the next character. The prediction network is updated every
-# input sample. The prediction network is trained to predict the next character
+# distribution over the next token. The prediction network is updated every
+# input sample. The prediction network is trained to predict the next token
 # in the sequence. The loss function is the cross entropy loss function. 
 
 # Use the following bash command to get seed strings of a specific length. In this 
@@ -23,6 +23,9 @@
 # Training data:
 #  Children's book corpus: https://huggingface.co/roneneldan/
 #  Standardized Gutenberg corpus: https://github.com/pgcorpus/gutenberg
+#
+# Be sure to feed it with tokenized data, not ascii data. Use tokenizer.py to
+# tokenize ascii data. Use utf8_to_ascii.py to convert utf8 data to ascii data.
 
 # Import the libraries we will need:
 import torch
@@ -54,8 +57,8 @@ WEIGHT_DECAY   = 0.1
 USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 # ==================================================================================================
-CUDA_DEVICE         = -1
-MODE                = "generate"
+CUDA_DEVICE         = 0
+MODE                = "train"
 SEED_STR            = """read the book read the book read the book"""
 TEMPERATURE         = 0.4  
 EMBEDDING_LEN       = 32
@@ -66,13 +69,13 @@ FIFO_LEN            = 4
 CONVNET_HIDDEN_DIMS = [[256,128],[128,128],[128,128],[128,128],[128,128],[128,128]] 
 PREDNET_HIDDEN_DIMS = [1024,512,256]
 BATCH_SIZE          = 128
-MAX_CHARS           = 2**24 #2**30
-CORPUS_FILE         = "/data/training_data/TinyStories-train.txt"
-MODEL_FILE          = "/data/trained_models/small.pth"
+MAX_TOKENS          = 2**24 #2**30
+CORPUS_FILE         = "/data/training_data/TinyStories-train.tok256"
+MODEL_FILE          = "/data/trained_models/token_predictor.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
-parser = argparse.ArgumentParser(description='Train or generate text using a character predicting network.')
+parser = argparse.ArgumentParser(description='Train or generate text using a token predicting network.')
 parser.add_argument('--cuda_device',         type=int,   default=CUDA_DEVICE, help='The GPU to run on. -1 = use all GPUs. (default: %(default)s)')
 parser.add_argument('--mode',                type=str,   default=MODE, help='The mode: train, finetune, or generate (default: %(default)s)')
 parser.add_argument('--seed_str',            type=str,   default=SEED_STR, help='The seed string to use for generating text (default: %(default)s)')
@@ -85,7 +88,7 @@ parser.add_argument('--prednet_hidden_dims', type=ast.literal_eval,   default=PR
 parser.add_argument('--num_epochs',          type=int,   default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
 parser.add_argument('--shuffle',             type=bool,  default=SHUFFLE, help='Whether to shuffle the data (default: %(default)s)')
 parser.add_argument('--batch_size',          type=int,   default=BATCH_SIZE, help='The batch size (default: %(default)s)')
-parser.add_argument('--max_chars',           type=int,   default=MAX_CHARS, help='The maximum number of characters to read from the corpus file (default: %(default)s)')
+parser.add_argument('--max_tokens',          type=int,   default=MAX_TOKENS, help='The maximum number of tokens to read from the tokenized corpus file (default: %(default)s)')
 parser.add_argument('--corpus_file',         type=str,   default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
 parser.add_argument('--model_file',          type=str,   default=MODEL_FILE, help='The model file (default: %(default)s)')
 args = parser.parse_args()
@@ -95,8 +98,8 @@ if args.cuda_device > -1:
 
 ###########################################################################################################################
 
-# Define the prediction network class. It will iterate over the sequence, and for each character in the sequence,
-# it will predict the next character in the sequence. It will use the most recent output of each stage, as well
+# Define the prediction network class. It will iterate over the sequence, and for each token in the sequence,
+# it will predict the next token in the sequence. It will use the most recent output of each stage, as well
 # as the output of the embedding layer as input. 
 class PredNet(nn.Module):
     def __init__(self, input_dim, hidden_dims, output_dim):
@@ -106,11 +109,9 @@ class PredNet(nn.Module):
         self.output_dim  = output_dim
         self.hidden_dims = hidden_dims
 
-        # Create the layers using a list and Sequential(). We need PReLU() between the linear layers, but the
-        # last layer should not have a PReLU() after it because we want the output to be a probability distribution
-        # and softmax will be applied to it later in before the loss function. Also, the last layer should have
-        # dimensionality equal to the number of characters in the vocabulary and is its own special layer. If
-        # hidden_dims is empty we will still have this output layer.
+        # Create the layers the last layer should have
+        # dimensionality equal to the number of characters in the vocabulary. If
+        # hidden_dims is empty we will still have the output layer.
         layers = []
         current_in_dim = self.input_dim
         for i in range(len(self.hidden_dims)):
@@ -239,10 +240,10 @@ class MultiStageConvNet(nn.Module):
         return stage_outputs
     
 
-# Define the CharPredictorMultirateFFN class:
-class CharPredictorMultirateFFN(nn.Module):
+# Define the TokenPredictorMultirateFFN class:
+class TokenPredictorMultirateFFN(nn.Module):
     def __init__(self, vocab_size, embedding_len, seq_len, fifo_len, convnet_hidden_dims, prednet_hidden_dims):
-        super(CharPredictorMultirateFFN, self).__init__()
+        super(TokenPredictorMultirateFFN, self).__init__()
 
         # Create the embedding layer:
         self.embedding = nn.Embedding(vocab_size, embedding_len)
@@ -308,8 +309,10 @@ class LazyCorpusDataset(Dataset):
     def __getitem__(self, idx):
         start = idx * (self.seq_len + 1)
         sample = self.corpus[start : start + self.seq_len + 1]
-        input_data = torch.tensor(list(sample[:-1]), dtype=torch.long)
-        target_data = torch.tensor(list(sample[1:]), dtype=torch.long)
+        #input_data = torch.tensor(list(sample[:-1]), dtype=torch.long)
+        #target_data = torch.tensor(list(sample[1:]), dtype=torch.long)
+        input_data = torch.tensor(sample[:-1], dtype=torch.long)
+        target_data = torch.tensor(sample[1:], dtype=torch.long)
         return input_data, target_data
 
 
@@ -330,9 +333,16 @@ def init_weights(m):
             nn.init.constant_(m.bias, 0)
 
 # Preprocess the corpus data as raw 8-bit binary data:
-def read_corpus(file_path, max_chars=None):
+def read_corpus(file_path, max_tokens=None):
+    if VOCAB_SIZE > 256:
+        token_dtype = np.uint16
+    else:
+        token_dtype = np.uint8
     with open(file_path, "rb") as f:
-        corpus = f.read(max_chars)
+        # Read the entire file as a 1-D array of token IDs. We need to read
+        # a different number of bytes depending on the size of the token_dtype.
+        num_bytes_to_read = np.dtype(token_dtype).itemsize
+        corpus = np.frombuffer(f.read(max_tokens*num_bytes_to_read), dtype=token_dtype)
     return corpus
 
 # Save the model and optimizer:
@@ -433,54 +443,59 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
 
 ###########################################################################################################################
 # Generate text using the model. The seed_str is the initial context.
-#   Note that the length of the seed_str acts as the "warmup". The model will first
-#   be fed with the seed_str, one character at a time, as warmup. Then the model
-#   will be fed with its own output, one character at a time to generate the text.
+#   Note that the length of the seed_str acts as the "warmup". We must first tokenize
+#   the seed_str. Then the model will
+#   be fed with the tokens, one token at a time, as warmup. Then the model
+#   will be fed with its own output, one token at a time to generate the text.
 @torch.no_grad()
 def generate_text(model, seed_str, temperature, seq_len, device, vocab_size):    
 
-    # Create a context string filled with spaces that is seq_len long:
-    context = [ord(' ')] * seq_len
+    # TODO:
+    # Print to stderr:
+    print("Not implemented yet", file=sys.stderr)
+    sys.exit(1)
+    # # Create a context string filled with spaces that is seq_len long:
+    # context = [ord(' ')] * seq_len
 
-    # Copy the seed_str into the front of the context string:
-    for i, c in enumerate(seed_str):
-        context[i] = ord(c)
+    # # Copy the seed_str into the front of the context string:
+    # for i, c in enumerate(seed_str):
+    #     context[i] = ord(c)
 
-    context_tensor = torch.tensor(context, dtype=torch.long, device=device)
-    context_tensor = context_tensor.unsqueeze(0)
-    outputs = model(context_tensor)
+    # context_tensor = torch.tensor(context, dtype=torch.long, device=device)
+    # context_tensor = context_tensor.unsqueeze(0)
+    # outputs = model(context_tensor)
     
-    # Outputs is the next-character prediction for each character in the context.
-    # However, only one of these is valid, the one directly after the last character
-    # in the seed_str. So we need to find that one and use it as the first character
-    predicted_char_idx = len(seed_str)-1
-    predicted_char = outputs[0, predicted_char_idx, :].argmax().item()
+    # # Outputs is the next-character prediction for each character in the context.
+    # # However, only one of these is valid, the one directly after the last character
+    # # in the seed_str. So we need to find that one and use it as the first character
+    # predicted_char_idx = len(seed_str)-1
+    # predicted_char = outputs[0, predicted_char_idx, :].argmax().item()
     
-    # Now we need to replace the corresponding character in the context with the
-    # predicted character:
-    context[predicted_char_idx+1] = predicted_char
-    predicted_char_idx += 1    
+    # # Now we need to replace the corresponding character in the context with the
+    # # predicted character:
+    # context[predicted_char_idx+1] = predicted_char
+    # predicted_char_idx += 1    
 
-    print(seed_str, ":", chr(predicted_char), end="", flush=True)
-    # Now we can start generating the text. We'll do this by filling the rest of the context    
-    while predicted_char_idx < seq_len-1:
-        context_tensor = torch.tensor(context, dtype=torch.long, device=device)
-        context_tensor = context_tensor.unsqueeze(0)
-        outputs = model(context_tensor) 
+    # print(seed_str, ":", chr(predicted_char), end="", flush=True)
+    # # Now we can start generating the text. We'll do this by filling the rest of the context    
+    # while predicted_char_idx < seq_len-1:
+    #     context_tensor = torch.tensor(context, dtype=torch.long, device=device)
+    #     context_tensor = context_tensor.unsqueeze(0)
+    #     outputs = model(context_tensor) 
 
-        # The output of our model has LogSoftmax() applied already, but we went to use a temperature parameter to
-        # scale the logits before we apply softmax. So we need to first exponentiate the outputs, then scale them
-        # by the temperature, then apply softmax. We can do this all in one step using the softmax function. Then
-        # we can use np.random.choice() to sample from the output distribution.
-        probs = F.softmax(outputs[0,predicted_char_idx,:]/temperature, dim=0).cpu().data.numpy().flatten()
-        predicted_char = np.random.choice(vocab_size, p=probs)
+    #     # The output of our model has LogSoftmax() applied already, but we went to use a temperature parameter to
+    #     # scale the logits before we apply softmax. So we need to first exponentiate the outputs, then scale them
+    #     # by the temperature, then apply softmax. We can do this all in one step using the softmax function. Then
+    #     # we can use np.random.choice() to sample from the output distribution.
+    #     probs = F.softmax(outputs[0,predicted_char_idx,:]/temperature, dim=0).cpu().data.numpy().flatten()
+    #     predicted_char = np.random.choice(vocab_size, p=probs)
         
-        context[predicted_char_idx+1] = predicted_char
-        predicted_char_idx += 1
+    #     context[predicted_char_idx+1] = predicted_char
+    #     predicted_char_idx += 1
 
-        # print the progress, overwritng the previous output:
-        print(chr(predicted_char), end="", flush=True)
-    print("\n")   
+    #     # print the progress, overwritng the previous output:
+    #     print(chr(predicted_char), end="", flush=True)
+    # print("\n")   
 
 
 ###########################################################################################################################
@@ -491,10 +506,10 @@ def main():
 
     if args.mode == "train":
         # Read the corpus:
-        corpus = read_corpus(args.corpus_file, args.max_chars)
+        corpus = read_corpus(args.corpus_file, args.max_tokens)
 
         # Create the model:   
-        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
+        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
 
         # Initialize the weights:
         model.apply(init_weights)
@@ -522,10 +537,10 @@ def main():
 
     elif args.mode == "finetune":
         # Read the corpus:
-        corpus = read_corpus(args.corpus_file, args.max_chars)
+        corpus = read_corpus(args.corpus_file, args.max_tokens)
 
         # Create the model:
-        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
+        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
         if args.cuda_device < 0:
             model = nn.DataParallel(model)
         model.train()
@@ -557,7 +572,7 @@ def main():
             seed_str = sys.stdin.read()
         
         # Create the model:
-        model = CharPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims) 
+        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims) 
         if args.cuda_device < 0:
             model = nn.DataParallel(model)
         model.eval()
