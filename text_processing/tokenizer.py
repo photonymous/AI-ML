@@ -60,11 +60,13 @@ while True:
     # Ensure the tokens.ids are uint8 or uint16, depending on output_data_type.:
     # Make a numpy array from the tokens.ids:
     tokens = np.array(tokens.ids, dtype=output_data_type)
-    # Write the tokens to stdout as binary uint8 data:
-    output_file.write(tokens.tobytes())
+    # Write the np.array() to stdout:
+    output_file.write(tokens)
 
     # Write a newline character to stdout:
-    output_file.write(b'\n')
+    # OOPS. Why did we have this line? 
+    # output_file.write(b'\n')
+    
 # Flush the output buffer:
 output_file.flush()
 

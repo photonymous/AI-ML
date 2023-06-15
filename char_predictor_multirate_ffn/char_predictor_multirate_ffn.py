@@ -56,7 +56,7 @@ USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 # ==================================================================================================
 CUDA_DEVICE         = 1
 MODE                = "train"
-SEED_STR            = """read the book read the book read the book"""
+SEED_STR            = """Once upon a time there was a boy who lived on a ranch."""
 TEMPERATURE         = 0.4  
 EMBEDDING_LEN       = 32
 SEQ_LEN             = 256 

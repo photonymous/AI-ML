@@ -50,27 +50,31 @@ from math import sqrt
 from tokenizers import Tokenizer
 
 # Specify all global constants that aren't arguments:
-VOCAB_SIZE     = 256
-LEARNING_RATE  = 0.001
+VOCAB_SIZE     = 4096
 LR_GAMMA       = 1.0
-WEIGHT_DECAY   = 0.1
+DROPOUT        = 0.2
 USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 # ==================================================================================================
-CUDA_DEVICE         = 0
-MODE                = "generate"
-SEED_STR            = """Once upon a time there was a girl named"""
-TEMPERATURE         = 0.4  
-EMBEDDING_LEN       = 128
-SEQ_LEN             = 256 
+CUDA_DEVICE         = -1
+MODE                = "finetune"
+SEED_STR            = """Ben wanted to ride on a plane."""
+TEMPERATURE         = 0.3 
+EMBEDDING_LEN       = 512
+SEQ_LEN             = 4096 
 NUM_EPOCHS          = 1
-SHUFFLE             = True
+LEARNING_RATE       = 0.001
+WEIGHT_DECAY        = 0.1
+SHUFFLE             = False
 FIFO_LEN            = 4 
-CONVNET_HIDDEN_DIMS = [[4*EMBEDDING_LEN, EMBEDDING_LEN]]*6 
-PREDNET_HIDDEN_DIMS = [1024,512,VOCAB_SIZE]
-BATCH_SIZE          = 512
-MAX_TOKENS          = 2**30 #2**30
-CORPUS_FILE         = "/data/training_data/TinyStories-train.tok256"
+CONVNET_HIDDEN_DIMS = [[4*EMBEDDING_LEN, EMBEDDING_LEN]]*8
+PREDNET_HIDDEN_DIMS = [4096,2048,1024,512,512]
+BATCH_SIZE          = 16
+MAX_TOKENS          = 5800000000 #2**29 #2**30
+#CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.tok4096"
+#CORPUS_FILE         = "/data/training_data/TinyStories-train.tok4096"
+CORPUS_FILE         = "/data/training_data/gutenberg/data/english_corpus.tok4096"
+#CORPUS_FILE         = "/data/training_data/TinyStories-train.tok256"
 MODEL_FILE          = "/data/trained_models/token_predictor.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
@@ -86,6 +90,8 @@ parser.add_argument('--fifo_len',            type=int,   default=FIFO_LEN, help=
 parser.add_argument('--convnet_hidden_dims', type=ast.literal_eval,   default=CONVNET_HIDDEN_DIMS, help='The convnet hidden dimensions (default: %(default)s)')
 parser.add_argument('--prednet_hidden_dims', type=ast.literal_eval,   default=PREDNET_HIDDEN_DIMS, help='The prediction network hidden dimensions (default: %(default)s)')
 parser.add_argument('--num_epochs',          type=int,   default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
+parser.add_argument('--learning_rate',       type=float, default=LEARNING_RATE, help='The learning rate (default: %(default)s)')
+parser.add_argument('--weight_decay',        type=float, default=WEIGHT_DECAY, help='The weight decay (default: %(default)s)')
 parser.add_argument('--shuffle',             type=bool,  default=SHUFFLE, help='Whether to shuffle the data (default: %(default)s)')
 parser.add_argument('--batch_size',          type=int,   default=BATCH_SIZE, help='The batch size (default: %(default)s)')
 parser.add_argument('--max_tokens',          type=int,   default=MAX_TOKENS, help='The maximum number of tokens to read from the tokenized corpus file (default: %(default)s)')
@@ -118,6 +124,8 @@ class PredNet(nn.Module):
             layers.append(nn.Linear(current_in_dim, self.hidden_dims[i]))
             layers.append(nn.LayerNorm(self.hidden_dims[i], eps=1e-4)) # eps is used to prevent NaNs in the loss
             layers.append(nn.PReLU())
+            ## EXPERIMENTAL: Add dropout after each layer
+            layers.append(nn.Dropout(p=DROPOUT))
             current_in_dim = self.hidden_dims[i]
         layers.append(nn.Linear(current_in_dim, self.output_dim))
 
@@ -157,7 +165,7 @@ class PredNet(nn.Module):
 
 
 class TimeStepNorm(nn.Module):
-    def __init__(self, num_features, eps=1e-5):
+    def __init__(self, num_features, eps=1e-4):
         super(TimeStepNorm, self).__init__()
         self.gamma = nn.Parameter(torch.ones(1, num_features, 1))  # Scale
         self.beta = nn.Parameter(torch.zeros(1, num_features, 1))  # Shift
@@ -190,10 +198,14 @@ class ConvNetStage(nn.Module):
         layers.append(nn.PReLU())
         for ii in range(1, len(hidden_dims)):
             layers.append(nn.Conv1d(in_channels=hidden_dims[ii-1], out_channels=hidden_dims[ii], kernel_size=1))
-            if ii == len(hidden_dims)-1:
-                layers.append(TimeStepNorm(hidden_dims[ii]))
+            #if ii == len(hidden_dims)-1:
+            #    layers.append(TimeStepNorm(hidden_dims[ii]))
+            ## EXPERIMENTAL:
+            layers.append(TimeStepNorm(hidden_dims[ii]))
             layers.append(nn.PReLU())
-        
+            ## EXPERIMENTAL:
+            # add dropout layer:
+            layers.append(nn.Dropout(p=DROPOUT))        
         self.layers = nn.Sequential(*layers)
 
     def forward(self, input):
@@ -335,7 +347,7 @@ def init_weights(m):
 # Preprocess the corpus data as raw 8-bit binary data:
 def read_corpus(file_path, max_tokens=None):
     if VOCAB_SIZE > 256:
-        token_dtype = np.uint16
+        token_dtype = np.int16 # for some reason PyTorch doesn't like uint16
     else:
         token_dtype = np.uint8
     with open(file_path, "rb") as f:
@@ -407,6 +419,7 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
             # Backward pass:
             scaler.scale(loss).backward()
             scaler.step(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1) # clip the gradients to avoid exploding gradients
             scaler.update()
 
             cur_loss               = loss.item()
@@ -548,6 +561,9 @@ def main():
         # Create the optimizer:
         optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY, eps=1e-4) # eps is used to prevent NaNs in the loss
         load_optimizer(optimizer, args.model_file + ".opt", device)
+        for param_group in optimizer.param_groups:
+            param_group['weight_decay'] = args.weight_decay
+            param_group['lr']           = args.learning_rate
 
         # Train the model:
         train_model(model, optimizer, corpus, args.batch_size, args.seq_len, device, args.num_epochs, args.shuffle)

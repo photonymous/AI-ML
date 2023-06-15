@@ -4,7 +4,7 @@ from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import ByteLevel, Whitespace, PreTokenizer, Sequence
 
-VOCAB_SIZE = 256
+VOCAB_SIZE = 4096
 
 #CORPUS_FILE = "/data/training_data/gutenberg_corpus_21MB.txt"
 CORPUS_FILE = "/data/training_data/gutenberg/data/english_corpus.ascii"

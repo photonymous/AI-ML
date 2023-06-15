@@ -42,7 +42,7 @@ vocab_file = "/data/training_data/vocab{}.json".format(vocab_len)
 tokenizer = Tokenizer.from_file(vocab_file)
   
 # read and detokenize the input file:
-delete_first_char = False
+# delete_first_char = False
 while True:
     # Read a chunk of tokens from stdin:
     tokens = np.frombuffer(input_file.read(CHUNK_SIZE * input_data_type().itemsize), dtype=input_data_type)
@@ -54,15 +54,15 @@ while True:
     # Detokenize the tokens:
     text = tokenizer.decode(tokens)
 
-    # For some reason, the detokenized data always has a "*" after each "\n".
-    # So we need to be able to detect this and delete it, but since we aren't
-    # able to process whole lines, we have to do it using a state machine:
-    if delete_first_char:
-        text = text[1:]
-        delete_first_char = False
-    if text[-1] == '\n':
-        delete_first_char = True
-    text = text.replace("\n*", "\n")
+    # # For some reason, the detokenized data always has a "*" after each "\n".
+    # # So we need to be able to detect this and delete it, but since we aren't
+    # # able to process whole lines, we have to do it using a state machine:
+    # if delete_first_char:
+    #     text = text[1:]
+    #     delete_first_char = False
+    # if text[-1] == '\n':
+    #     delete_first_char = True
+    # text = text.replace("\n*", "\n")
 
     # Write the text to stdout as ascii data, not utf-8:
     output_file.write(text.encode('ascii'))
