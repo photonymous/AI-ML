@@ -76,6 +76,7 @@ MAX_TOKENS          = 5800000000 #2**29 #2**30
 CORPUS_FILE         = "/data/training_data/gutenberg/data/english_corpus.tok4096"
 #CORPUS_FILE         = "/data/training_data/TinyStories-train.tok256"
 MODEL_FILE          = "/data/trained_models/token_predictor.pth"
+VOCAB_FILE          = "/data/training_data/vocab{}.json".format(VOCAB_SIZE)
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
@@ -97,6 +98,8 @@ parser.add_argument('--batch_size',          type=int,   default=BATCH_SIZE, hel
 parser.add_argument('--max_tokens',          type=int,   default=MAX_TOKENS, help='The maximum number of tokens to read from the tokenized corpus file (default: %(default)s)')
 parser.add_argument('--corpus_file',         type=str,   default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
 parser.add_argument('--model_file',          type=str,   default=MODEL_FILE, help='The model file (default: %(default)s)')
+parser.add_argument('--vocab_file',          type=str,   default=VOCAB_FILE, help='The vocab file (default: %(default)s)')
+
 args = parser.parse_args()
 
 if args.cuda_device > -1:
@@ -461,10 +464,9 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
 #   be fed with the tokens, one token at a time, as warmup. Then the model
 #   will be fed with its own output, one token at a time to generate the text.
 @torch.no_grad()
-def generate_text(model, seed_str, temperature, seq_len, device, vocab_size):    
+def generate_text(model, seed_str, temperature, seq_len, device, vocab_size, vocab_file):    
 
     # Tokenize the context string:
-    vocab_file = "/data/training_data/vocab{}.json".format(VOCAB_SIZE)
     tokenizer = Tokenizer.from_file(vocab_file)
     tokenized_seed_str = tokenizer.encode(seed_str)    
 
@@ -594,7 +596,7 @@ def main():
         load_model(model, args.model_file, device)
 
         # Generate text:
-        generated_text = generate_text(model, seed_str, args.temperature, args.seq_len, device, VOCAB_SIZE)
+        generated_text = generate_text(model, seed_str, args.temperature, args.seq_len, device, VOCAB_SIZE, args.vocab_file)
 
     else:
         print("Invalid mode: " + args.mode)
