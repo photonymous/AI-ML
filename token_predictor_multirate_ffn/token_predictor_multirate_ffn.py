@@ -51,16 +51,15 @@ from tokenizers import Tokenizer
 from matplotlib import pyplot as plt
 
 # Specify all global constants that aren't arguments:
-VOCAB_SIZE     = 4096
 LR_GAMMA       = 1.0
 DROPOUT        = 0.2
 USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 # ==================================================================================================
 CUDA_DEVICE         = 1
-MODE                = "measure"
+MODE                = "generate"
 SEED_STR            = """Tommy wanted a bike."""
-TEMPERATURE         = 0.4 
+TEMPERATURE         = 0.2 
 EMBEDDING_LEN       = 128
 SEQ_LEN             = 512 
 NUM_EPOCHS          = 1
@@ -70,14 +69,16 @@ SHUFFLE             = False
 FIFO_LEN            = 4 
 CONVNET_HIDDEN_DIMS = [[512, 128],[512, 128],[512, 128],[512, 128],[512, 128],[512, 128]]
 PREDNET_HIDDEN_DIMS = [1024,512,256]
+SHARE_STAGES        = 0 # weight share the top stages
 BATCH_SIZE          = 32
 MAX_TOKENS          = 11000000 #2**29 #2**30
-CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.tok256"
-#CORPUS_FILE         = "/data/training_data/TinyStories-train.tok4096"
-#CORPUS_FILE         = "/data/training_data/gutenberg/data/english_corpus.tok4096"
-#CORPUS_FILE         = "/data/training_data/TinyStories-train.tok256"
-MODEL_FILE          = "/data/trained_models/tok_pred_small.pth"
+VOCAB_SIZE          = 256
 VOCAB_FILE          = "/data/training_data/vocab{}.json".format(VOCAB_SIZE)
+CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.tok{}".format(VOCAB_SIZE)
+#CORPUS_FILE         = "/data/training_data/TinyStories-train.tok{}".format(VOCAB_SIZE)
+#CORPUS_FILE         = "/data/training_data/gutenberg/data/english_corpus.tok{}".format(VOCAB_SIZE)
+#CORPUS_FILE         = "/data/training_data/TinyStories-train.tok{}".format(VOCAB_SIZE)
+MODEL_FILE          = "/data/trained_models/tok_pred_small.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
@@ -91,15 +92,17 @@ parser.add_argument('--seq_len',             type=int,   default=SEQ_LEN, help='
 parser.add_argument('--fifo_len',            type=int,   default=FIFO_LEN, help='The FIFO length (default: %(default)s)')
 parser.add_argument('--convnet_hidden_dims', type=ast.literal_eval,   default=CONVNET_HIDDEN_DIMS, help='The convnet hidden dimensions (default: %(default)s)')
 parser.add_argument('--prednet_hidden_dims', type=ast.literal_eval,   default=PREDNET_HIDDEN_DIMS, help='The prediction network hidden dimensions (default: %(default)s)')
+parser.add_argument('--share_stages',        type=int,   default=SHARE_STAGES, help='The number of stages to weight share (default: %(default)s)')
 parser.add_argument('--num_epochs',          type=int,   default=NUM_EPOCHS, help='The number of epochs (default: %(default)s)')
 parser.add_argument('--learning_rate',       type=float, default=LEARNING_RATE, help='The learning rate (default: %(default)s)')
 parser.add_argument('--weight_decay',        type=float, default=WEIGHT_DECAY, help='The weight decay (default: %(default)s)')
 parser.add_argument('--shuffle',             type=bool,  default=SHUFFLE, help='Whether to shuffle the data (default: %(default)s)')
 parser.add_argument('--batch_size',          type=int,   default=BATCH_SIZE, help='The batch size (default: %(default)s)')
 parser.add_argument('--max_tokens',          type=int,   default=MAX_TOKENS, help='The maximum number of tokens to read from the tokenized corpus file (default: %(default)s)')
+parser.add_argument('--vocab_size',          type=int,   default=VOCAB_SIZE, help='The vocab size (default: %(default)s)')
+parser.add_argument('--vocab_file',          type=str,   default=VOCAB_FILE, help='The vocab file (default: %(default)s)')
 parser.add_argument('--corpus_file',         type=str,   default=CORPUS_FILE, help='The corpus file (default: %(default)s)')
 parser.add_argument('--model_file',          type=str,   default=MODEL_FILE, help='The model file (default: %(default)s)')
-parser.add_argument('--vocab_file',          type=str,   default=VOCAB_FILE, help='The vocab file (default: %(default)s)')
 
 args = parser.parse_args()
 
@@ -215,16 +218,14 @@ class ConvNetStage(nn.Module):
     def forward(self, input):
         # input is a tensor of shape (batch_size, input_dim, seq_len)
         # output is a tensor of shape (batch_size, hidden_dims[-1], seq_len//dec_by)
-
         output = self.layers(input)
 
         return output
-
-
+    
 
 # Define the multistage convolutional network class.
 class MultiStageConvNet(nn.Module):
-    def __init__(self, embedding_len, fifo_len, convnet_hidden_dims):
+    def __init__(self, embedding_len, fifo_len, convnet_hidden_dims, share_stages):
         super(MultiStageConvNet, self).__init__()
         # The first layer in each stage will have a kernel size of fifo_len, and
         # the rest of the layers in the stage will have a kernel size of 1.
@@ -232,7 +233,8 @@ class MultiStageConvNet(nn.Module):
         # Create all the stages. We will use a list to hold the stages:
         self.convnet_hidden_dims = convnet_hidden_dims
         self.stages = nn.ModuleList()
-        for ii in range(len(convnet_hidden_dims)):
+        self.num_stages = len(convnet_hidden_dims)
+        for ii in range(self.num_stages - share_stages):
             # The input dimension to the first stage is the embedding length:
             if ii == 0:
                 input_dim = embedding_len
@@ -240,7 +242,9 @@ class MultiStageConvNet(nn.Module):
             else:
                 input_dim = convnet_hidden_dims[ii-1][-1]
                 self.stages.append(ConvNetStage(input_dim, fifo_len, convnet_hidden_dims[ii], dec_by=2))
-        
+        for ii in range(self.num_stages - share_stages, self.num_stages):
+            # The last share_stages stages, we will share weights:
+            self.stages.append(self.stages[self.num_stages - share_stages - 1])        
         
     def forward(self, x):
         # Create a container to hold the stage outputs:
@@ -253,20 +257,19 @@ class MultiStageConvNet(nn.Module):
             stage_outputs.append(x)
             
         # Return the list of stage outputs:
-
         return stage_outputs
     
 
 # Define the TokenPredictorMultirateFFN class:
 class TokenPredictorMultirateFFN(nn.Module):
-    def __init__(self, vocab_size, embedding_len, seq_len, fifo_len, convnet_hidden_dims, prednet_hidden_dims):
+    def __init__(self, vocab_size, embedding_len, seq_len, fifo_len, convnet_hidden_dims, prednet_hidden_dims, share_stages):
         super(TokenPredictorMultirateFFN, self).__init__()
 
         # Create the embedding layer:
         self.embedding = nn.Embedding(vocab_size, embedding_len)
 
         # Create the multistage convolutional network:
-        self.multistage_convnet = MultiStageConvNet(embedding_len, fifo_len, convnet_hidden_dims)
+        self.multistage_convnet = MultiStageConvNet(embedding_len, fifo_len, convnet_hidden_dims, share_stages)
 
         # Create the prediction network:
         #   But first, compute the size of the input dimension to the prediction network, which
@@ -555,7 +558,7 @@ def main():
         corpus = read_corpus(args.corpus_file, args.max_tokens)
 
         # Create the model:   
-        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
+        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims, args.share_stages)
 
         # Initialize the weights:
         model.apply(init_weights)
@@ -586,7 +589,7 @@ def main():
         corpus = read_corpus(args.corpus_file, args.max_tokens)
 
         # Create the model:
-        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
+        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims, args.share_stages)
         if args.cuda_device < 0:
             model = nn.DataParallel(model)
         model.train()
@@ -613,7 +616,7 @@ def main():
         corpus = read_corpus(args.corpus_file, args.max_tokens)
 
         # Create the model:
-        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
+        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims, args.share_stages)
         if args.cuda_device < 0:
             model = nn.DataParallel(model)        
         model.eval()
@@ -644,7 +647,7 @@ def main():
             seed_str = sys.stdin.read()
         
         # Create the model:
-        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims) 
+        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims, args.share_stages) 
         if args.cuda_device < 0:
             model = nn.DataParallel(model)
         model.eval()
