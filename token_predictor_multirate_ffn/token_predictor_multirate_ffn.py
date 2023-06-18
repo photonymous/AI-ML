@@ -48,6 +48,7 @@ import select
 import random
 from math import sqrt
 from tokenizers import Tokenizer
+from matplotlib import pyplot as plt
 
 # Specify all global constants that aren't arguments:
 VOCAB_SIZE     = 4096
@@ -56,26 +57,26 @@ DROPOUT        = 0.2
 USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 # ==================================================================================================
-CUDA_DEVICE         = -1
-MODE                = "finetune"
-SEED_STR            = """Ben wanted to ride on a plane."""
-TEMPERATURE         = 0.3 
-EMBEDDING_LEN       = 512
-SEQ_LEN             = 4096 
+CUDA_DEVICE         = 1
+MODE                = "measure"
+SEED_STR            = """Tommy wanted a bike."""
+TEMPERATURE         = 0.4 
+EMBEDDING_LEN       = 128
+SEQ_LEN             = 512 
 NUM_EPOCHS          = 1
 LEARNING_RATE       = 0.001
 WEIGHT_DECAY        = 0.1
 SHUFFLE             = False
 FIFO_LEN            = 4 
-CONVNET_HIDDEN_DIMS = [[4*EMBEDDING_LEN, EMBEDDING_LEN]]*8
-PREDNET_HIDDEN_DIMS = [4096,2048,1024,512,512]
-BATCH_SIZE          = 16
-MAX_TOKENS          = 5800000000 #2**29 #2**30
-#CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.tok4096"
+CONVNET_HIDDEN_DIMS = [[512, 128],[512, 128],[512, 128],[512, 128],[512, 128],[512, 128]]
+PREDNET_HIDDEN_DIMS = [1024,512,256]
+BATCH_SIZE          = 32
+MAX_TOKENS          = 11000000 #2**29 #2**30
+CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.tok256"
 #CORPUS_FILE         = "/data/training_data/TinyStories-train.tok4096"
-CORPUS_FILE         = "/data/training_data/gutenberg/data/english_corpus.tok4096"
+#CORPUS_FILE         = "/data/training_data/gutenberg/data/english_corpus.tok4096"
 #CORPUS_FILE         = "/data/training_data/TinyStories-train.tok256"
-MODEL_FILE          = "/data/trained_models/token_predictor.pth"
+MODEL_FILE          = "/data/trained_models/tok_pred_small.pth"
 VOCAB_FILE          = "/data/training_data/vocab{}.json".format(VOCAB_SIZE)
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
@@ -252,6 +253,7 @@ class MultiStageConvNet(nn.Module):
             stage_outputs.append(x)
             
         # Return the list of stage outputs:
+
         return stage_outputs
     
 
@@ -298,20 +300,6 @@ class TokenPredictorMultirateFFN(nn.Module):
 
 
 ###########################################################################################################################
-
-
-# # Create the dataset:
-# class CorpusDataset(Dataset):
-#     def __init__(self, input_sequences, target_sequences):
-#         self.input_sequences  = input_sequences
-#         self.target_sequences = target_sequences
-
-#     def __len__(self):
-#         return len(self.input_sequences)
-
-#     def __getitem__(self, idx):
-#         return self.input_sequences[idx], self.target_sequences[idx]
-
 
 class LazyCorpusDataset(Dataset):
     def __init__(self, corpus, seq_len):
@@ -456,6 +444,53 @@ def train_model(model, optimizer, corpus, batch_size, seq_len, device, num_epoch
     elapsed_time = stop_time - start_time
     print(f"Training time: {elapsed_time:.2f} seconds")
 
+###########################################################################################################################
+# Measure the model:
+@torch.no_grad()
+def measure_model(model, corpus, batch_size, seq_len, device, shuffle):
+
+    criterion = nn.NLLLoss(reduction=None)
+
+    dataset_phase = random.randint(0, seq_len - 1) if shuffle else 0
+    dataloader = create_phased_dataloader(dataset_phase, corpus, batch_size, seq_len, device, shuffle) 
+
+    # This function does not train the model. Instead, it is going to measure the model's performance
+    # by averaging the loss per sequence position.
+    loss_vs_context = np.zeros(seq_len, dtype=np.float32)
+    num_batches_per_epoch = len(dataloader)    
+
+    for batch_idx, (input_sequences, target_sequences) in enumerate(dataloader):
+        # Send the input and target sequences to the device:
+        input_sequences  = input_sequences.to(device)
+        target_sequences = target_sequences.to(device)
+
+        batch_size, seq_len = input_sequences.shape
+        batch_indices = torch.arange(batch_size).view(-1, 1).expand(-1, seq_len).to(device)
+        seq_indices = torch.arange(seq_len).expand(batch_size, -1).to(device)
+
+        # Forward pass using AMP for FP16:
+        with torch.autocast(device_type=device, dtype=torch.float16, enabled=USE_AMP):
+            outputs = model(input_sequences)
+
+            selected_outputs = outputs[batch_indices, seq_indices, target_sequences]
+            # Turn them into probabilities using F.softmax:
+            probs = F.softmax(selected_outputs, dim=1).cpu().data.numpy()
+            # # Turn the probabilities into entropies (bits):
+            # entropies = -np.log2(probs)
+            # # Average them along the batch_idx dimension:
+            # avg_entropy_vs_context_len = entropies.mean(axis=0)
+
+            # loss_vs_context += avg_entropy_vs_context_len
+            loss_vs_context += probs.mean(axis=0)
+        #Print our progress (%):
+        progress_pct = (batch_idx + 1) / num_batches_per_epoch * 100
+        print(f"\rProgress: {progress_pct:7.3f}%", end="\r", flush=True)
+    print()
+    loss_vs_context /= num_batches_per_epoch
+
+    return loss_vs_context
+
+
 
 ###########################################################################################################################
 # Generate text using the model. The seed_str is the initial context.
@@ -573,7 +608,30 @@ def main():
         # Save the model and optimizer:
         save_model(model, args.model_file)
         save_optimizer(optimizer, args.model_file + ".opt")
+    elif args.mode == "measure":
+        # Read the corpus:
+        corpus = read_corpus(args.corpus_file, args.max_tokens)
 
+        # Create the model:
+        model = TokenPredictorMultirateFFN(VOCAB_SIZE, args.embedding_len, args.seq_len, args.fifo_len, args.convnet_hidden_dims, args.prednet_hidden_dims)
+        if args.cuda_device < 0:
+            model = nn.DataParallel(model)        
+        model.eval()
+        model.to(device)
+
+        # Load the model:
+        load_model(model, args.model_file, device)
+
+        # Measure the model:
+        loss_vs_context = measure_model(model, corpus, args.batch_size, args.seq_len, device, args.shuffle)
+
+        # Plot the loss vs context and label axes:
+        plt.plot(loss_vs_context)
+        plt.xlabel("Context")
+        plt.ylabel("Loss")
+        plt.show()
+        # pause:
+        input("Press Enter to continue...")
     elif args.mode == "generate":
         # Check to see of anything was passed in on stdin:
         read_stdin = False
