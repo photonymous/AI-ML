@@ -56,29 +56,29 @@ DROPOUT        = 0.2
 USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 # ==================================================================================================
-CUDA_DEVICE         = 1
-MODE                = "generate"
+CUDA_DEVICE         = -1
+MODE                = "finetune"
 SEED_STR            = """Tommy wanted a bike."""
-TEMPERATURE         = 0.2 
-EMBEDDING_LEN       = 128
-SEQ_LEN             = 512 
-NUM_EPOCHS          = 1
+TEMPERATURE         = 0.3 
+EMBEDDING_LEN       = 512
+SEQ_LEN             = 2048 
+NUM_EPOCHS          = 2
 LEARNING_RATE       = 0.001
 WEIGHT_DECAY        = 0.1
-SHUFFLE             = False
+SHUFFLE             = 1
 FIFO_LEN            = 4 
-CONVNET_HIDDEN_DIMS = [[512, 128],[512, 128],[512, 128],[512, 128],[512, 128],[512, 128]]
-PREDNET_HIDDEN_DIMS = [1024,512,256]
-SHARE_STAGES        = 0 # weight share the top stages
+CONVNET_HIDDEN_DIMS = [[2048,1024,512],[2048,1024,512],[2048,1024,512],[2048,1024,512],[2048,1024,512],[2048,1024,512],[2048,1024,512],[2048,1024,512]]
+PREDNET_HIDDEN_DIMS = [4096,2048,1024,512,512]
+SHARE_STAGES        = 2 # weight share the top stages
 BATCH_SIZE          = 32
-MAX_TOKENS          = 11000000 #2**29 #2**30
-VOCAB_SIZE          = 256
+MAX_TOKENS          = 560000000 #11000000 #2**29 #2**30
+VOCAB_SIZE          = 4096
 VOCAB_FILE          = "/data/training_data/vocab{}.json".format(VOCAB_SIZE)
-CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.tok{}".format(VOCAB_SIZE)
-#CORPUS_FILE         = "/data/training_data/TinyStories-train.tok{}".format(VOCAB_SIZE)
+#CORPUS_FILE         = "/data/training_data/gutenberg_corpus_21MB.tok{}".format(VOCAB_SIZE)
+CORPUS_FILE         = "/data/training_data/TinyStories-train.tok{}".format(VOCAB_SIZE)
 #CORPUS_FILE         = "/data/training_data/gutenberg/data/english_corpus.tok{}".format(VOCAB_SIZE)
 #CORPUS_FILE         = "/data/training_data/TinyStories-train.tok{}".format(VOCAB_SIZE)
-MODEL_FILE          = "/data/trained_models/tok_pred_small.pth"
+MODEL_FILE          = "/data/trained_models/tok_pred_share2_TS.pth"
 
 # Define the command line arguments and assign defaults and format the strings using the globals:
 # Note that the arguments can be accessed in code like this: args.mode, args.seed_str, etc.
