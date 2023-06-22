@@ -57,8 +57,8 @@ USE_AMP        = True # Use Automatic Mixed Precision (AMP) for FP16
 
 # ==================================================================================================
 CUDA_DEVICE         = -1
-MODE                = "finetune"
-SEED_STR            = """Tommy wanted a bike."""
+MODE                = "generate"
+SEED_STR            = """Alice and Jack walked up the street and met a girl in a red dress. The girl said to them, "Hi, I'm Jane. What are your names?" """
 TEMPERATURE         = 0.3 
 EMBEDDING_LEN       = 512
 SEQ_LEN             = 2048 
